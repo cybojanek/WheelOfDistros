@@ -27,10 +27,10 @@ Run the make command, and specify some required parameters
 **Required**
 
 * **DISTRO**
-    - One of ArchLinux, Ubuntu, Debian
+    - One of archlinux, ubuntu, debian
 
 * **RELEASE**
-    - For Ubuntu/Debian, 13.04, Wheezy etc...
+    - For Ubuntu/Debian only: raring, wheezy etc..
 
 **Optional**
 
@@ -38,11 +38,10 @@ Run the make command, and specify some required parameters
     - Enable IP forwarding and NATing and serve up internet to the machine
 
 * **ARCHITECTURE**
-    - Default x86_64
+    - Default amd64
 
 * **DNSMASQ_ADD_OPTS**
     - Any additional options to pass to dnsmasq
 
 * **other**
     - Look at *Makefile* for other parameters to override
-

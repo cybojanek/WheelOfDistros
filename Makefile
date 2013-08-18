@@ -42,7 +42,9 @@ stop:
 	sudo sysctl -w net.inet.ip.forwarding=0
 
 clean:
-	rm -rf downloads root
+	rm -rf downloads
+	rm -rf root
+	rm -f dnsmasq.*
 
 dnsmasq:
 	sudo dnsmasq --pid-file=$(DNSMASQ_PID_FILE) --log-facility=$(DNSMASQ_LOG_FILE) \
@@ -50,19 +52,14 @@ dnsmasq:
 		--enable-tftp --tftp-root=$(TFTP_ROOT) \
 		--dhcp-range=$(DHCP_RANGE) --dhcp-boot=$(DHCP_BOOT) $(DNSMASQ_ADD_OPTS)
 
-# webserver_archlinux:
-	# @echo webserver
-	# python -m simplehttpd
-
 downloads:
 	mkdir downloads
 
 nat:
-	@ if [[ ! -z "$(NAT)" ]]; then \
+	@if [[ ! -z "$(NAT)" ]]; then \
 		if [[ "$(KERNEL)" == "Darwin" ]]; then \
 			sudo sysctl -w net.inet.ip.forwarding=1; \
-			alias_ip=$(ifconfig $(NAT) | grep inet | grep -v inet6 | awk '{print $2}' | head -1); \
-			sudo /usr/sbin/natd -alias_address $alias_ip -interface $(NAT) -use_sockets -same_ports -unregistered_only -dynamic -clamp_mss; \
+			sudo /usr/sbin/natd -alias_address `ifconfig "$(NAT)" | grep inet | grep -v inet6 | cut -d' ' -f2 | head -1` -interface $(NAT) -use_sockets -same_ports -unregistered_only -dynamic -clamp_mss; \
 			sudo ipfw add divert natd ip from any to any via "$(NAT)"; \
 		fi \
 	elif [[ "$(KERNEL)" == "Linux" ]]; then \
@@ -72,10 +69,10 @@ nat:
 ###############################################################################
 ################################## Archlinux ##################################
 ###############################################################################
-# downloads/archlinux.iso: downloads
+downloads/archlinux.iso: downloads
 # 	wget -c -O downloads/archlinux.iso https://mirrors.kernel.org/archlinux/iso/2013.08.01/archlinux-2013.08.01-dual.iso
 
-# archlinux: downloads/archlinux.iso webserver_archlinux dnsmasq nat
+archlinux: downloads/archlinux.iso webserver_archlinux dnsmasq nat
 	# mkdir -p $(ROOT)/archlinux
 	# sudo umount $(ROOT)/archlinux
 	# sudo mount archlinux.iso $(ROOT)/archlinux
@@ -87,7 +84,7 @@ $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz:
 	mkdir -p $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)
 	wget -c -O $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz http://archive.ubuntu.com/ubuntu/dists/$(RELEASE)/main/installer-$(ARCHITECTURE)/current/images/netboot/netboot.tar.gz
 
-ubuntu: $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq
+ubuntu: $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq nat
 	cd $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE) && tar -xf netboot.tar.gz
 
 ###############################################################################
@@ -97,5 +94,5 @@ $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz:
 	mkdir -p $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)
 	wget -c -O $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz http://ftp.nl.debian.org/debian/dists/$(RELEASE)/main/installer-$(ARCHITECTURE)/current/images/netboot/netboot.tar.gz
 
-debian: $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq
+debian: $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq nat
 	cd $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE) && tar -xf netboot.tar.gz

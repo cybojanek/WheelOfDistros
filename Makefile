@@ -33,8 +33,7 @@ else ifeq ($(DISTRO), ubuntu)
 	TFTP_ROOT="$(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)"
 endif
 
-all:
-	@echo "Nothing to do for all. Specify something"
+all: $(DISTRO)
 
 stop:
 	-sudo killall -9 dnsmasq
@@ -42,8 +41,10 @@ stop:
 	sudo ipfw -f flush
 	sudo sysctl -w net.inet.ip.forwarding=0
 
+clean:
+	rm -rf downloads root
 
-dnsmasq_start:
+dnsmasq:
 	sudo dnsmasq --pid-file=$(DNSMASQ_PID_FILE) --log-facility=$(DNSMASQ_LOG_FILE) \
 		--conf-file=$(DNSMASQ_CONF_FILE) --dhcp-leasefile=$(DNSMASQ_LEASE_FILE) \
 		--enable-tftp --tftp-root=$(TFTP_ROOT) \
@@ -74,7 +75,7 @@ nat:
 # downloads/archlinux.iso: downloads
 # 	wget -c -O downloads/archlinux.iso https://mirrors.kernel.org/archlinux/iso/2013.08.01/archlinux-2013.08.01-dual.iso
 
-# archlinux: downloads/archlinux.iso webserver_archlinux dnsmasq_start nat
+# archlinux: downloads/archlinux.iso webserver_archlinux dnsmasq nat
 	# mkdir -p $(ROOT)/archlinux
 	# sudo umount $(ROOT)/archlinux
 	# sudo mount archlinux.iso $(ROOT)/archlinux
@@ -86,15 +87,15 @@ $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz:
 	mkdir -p $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)
 	wget -c -O $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz http://archive.ubuntu.com/ubuntu/dists/$(RELEASE)/main/installer-$(ARCHITECTURE)/current/images/netboot/netboot.tar.gz
 
-ubuntu: $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq_start
+ubuntu: $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq
 	cd $(ROOT)/ubuntu/$(RELEASE)/$(ARCHITECTURE) && tar -xf netboot.tar.gz
 
 ###############################################################################
 ################################### Debian ####################################
 ###############################################################################
-debian_tar:
-	wget -c http://debian....$(RELEASE)
+$(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz:
+	mkdir -p $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)
+	wget -c -O $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz http://ftp.nl.debian.org/debian/dists/$(RELEASE)/main/installer-$(ARCHITECTURE)/current/images/netboot/netboot.tar.gz
 
-debian: debian_tar
-	mkdir -p $(ROOT)/debian/$(RELEASE)
-
+debian: $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE)/netboot.tar.gz dnsmasq
+	cd $(ROOT)/debian/$(RELEASE)/$(ARCHITECTURE) && tar -xf netboot.tar.gz

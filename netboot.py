@@ -2,6 +2,7 @@
 import argparse
 import os
 import subprocess
+import sys
 import tarfile
 import time
 import urllib2
@@ -63,7 +64,8 @@ def download(url, output, checksum=None):
                 last_read = downloaded
                 start = end
             # TODO: fix whitespace on the right due to non-overwriting
-            print "%s    %05.2f %%    %s/s     \r" % (file_name, p * 100.0, pretty_bytes(rate)),
+            print "%s    %05.2f %%    %s/s     \r" % (file_name, p * 100.0,
+                                                      pretty_bytes(rate)),
         print ""
         destination.close()
 
@@ -71,19 +73,13 @@ def download(url, output, checksum=None):
 class LinuxDistro(object):
     """Abstracts a Linux Distribution
     Expects that fetch, unpack, start, and stop will be subclassed
+    and that self.tftp_root will be defined
 
     """
-    def __init__(self, release, architecture):
+    def __init__(self):
         """Create a new LinuxDistro object
-
-        Arguments:
-        release - release version
-        architecture - cpu architecture
-
         """
         super(LinuxDistro, self).__init__()
-        self.release = release
-        self.architecture = architecture
         self.tftp_root = None
 
     def fetch(self):
@@ -129,6 +125,7 @@ class ArchLinux(LinuxDistro):
         # Nothing to do here - we just need dnsmasq
         pass
 
+
 class Debian(LinuxDistro):
     """Debian Distribution"""
 
@@ -142,8 +139,17 @@ class Debian(LinuxDistro):
                        "powerpc", "s390", "s390x" "sparc"])
     }
 
-    def __init__(self, *args):
-        super(Debian, self).__init__(*args)
+    def __init__(self, release, architecture):
+        """Debian
+
+        Arguments:
+        release - release version
+        architecture - cpu architecture
+
+        """
+        super(Debian, self).__init__()
+        self.release = release
+        self.architecture = architecture
         # Check that its a valid release
         if self.release not in self.RELEASES:
             raise Exception("No such %s release: %s" % (type(self), self.release))
@@ -204,8 +210,9 @@ class Ubuntu(Debian):
 
 class DNSMasq(object):
     """docstring for DNSMasq"""
-    def __init__(self, tftp_root, dhcp_boot, dhcp_range):
+    def __init__(self, interface, tftp_root, dhcp_boot, dhcp_range):
         super(DNSMasq, self).__init__()
+        self.interface = interface
         self.tftp_root = tftp_root
         self.dhcp_boot = dhcp_boot
         self.dhcp_range = dhcp_range
@@ -213,6 +220,7 @@ class DNSMasq(object):
     def start(self):
         print "Running dnsmasq..."
         subprocess.call(["dnsmasq",
+            "--interface=%s" % self.interface,
             "--pid-file=%s/dnsmasq.pid" % os.getcwd(),
             "--log-facility=%s/dnsmasq.log" % os.getcwd(),
             "--dhcp-leasefile=%s/dnsmasq.leases" % os.getcwd(),
@@ -226,6 +234,47 @@ class DNSMasq(object):
         print "Stopping dnsmasq..."
         pid = open('%s/dnsmasq.pid' % os.getcwd()).read().rstrip()
         subprocess.call(["kill", pid])
+
+
+class NAT(object):
+    """docstring for NAT"""
+    def __init__(self, interface):
+        super(NAT, self).__init__()
+        self.interface = interface
+
+    def start(self):
+        if sys.platform == 'darwin':
+            subprocess.call(["sysctl", "-w", "net.inet.ip.forwarding=1"])
+            p = subprocess.Popen(["ifconfig", self.interface],
+                                 stdout=subprocess.PIPE)
+            out, err = p.communicate()
+            if p.returncode != 0:
+                raise Exception("Failed to get ip for NAT device: %s"
+                                "" % self.interface)
+            ip = filter(lambda x: x.lstrip().rstrip().startswith('inet '),
+                        out.split('\n'))[0].split()[1]
+            subprocess.call(["/usr/sbin/natd", "-alias_address", ip,
+                             "-interface", self.interface, "-use_sockets",
+                             "-same_ports", "-unregistered_only", "-dynamic",
+                             "-clamp_mss"])
+            subprocess.call(["ipfw", "add", "divert", "natd", "ip", "from",
+                             "any", "to", "any", "via", self.interface])
+        elif sys.platform == 'linux':
+            subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+            subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o",
+                             self.interface, "-j", "MASQUERADE"])
+
+    def stop(self):
+        if sys.platform == 'darwin':
+            subprocess.call(["sysctl", "-w", "net.inet.ip.forwarding=0"])
+            subprocess.call(["killall", "-9", "natd"])
+            subprocess.call(["ipfw", "-f", "flush"])
+        elif sys.platform == 'linux':
+            subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=0"])
+            # TODO: change this to remove
+            subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o",
+                             self.interface, "-j", "MASQUERADE"])
+
 
 DistroMapping = {"debian": Debian, "ubuntu": Ubuntu, "archlinux": ArchLinux}
 
@@ -263,6 +312,13 @@ if __name__ == '__main__':
     archlinux.set_defaults(distro="archlinux")
 
 
+
+    # dnsmasq interface
+    parser.add_argument("--interface", required=True,
+                        help="Interface to serve dhcp and tftp")
+    # NAT interface
+    parser.add_argument("--nat", required=False, help="Interface for NAT")
+
     # Download or serve
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument("--download", action='store_true', default=False,
@@ -274,6 +330,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Check for root
+    if (args.serve or args.stop) and os.getuid() != 0:
+        print "Need root priveleges to serve/stop"
+        sys.exit(1)
+
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
     else:
@@ -283,9 +344,16 @@ if __name__ == '__main__':
         linux.fetch()
         linux.unpack()
     elif args.serve:
+        if args.nat is not None:
+            nat = NAT(args.nat)
+            nat.start()
         linux.start()
-        dnsmasq = DNSMasq(linux.tftp_root, linux.dhcp_boot, "10.1.0.100,10.1.0.200,12h")
+        dnsmasq = DNSMasq(args.interface, linux.tftp_root, linux.dhcp_boot,
+                          "10.1.0.100,10.1.0.200,12h")
         dnsmasq.start()
     elif args.stop:
         DNSMasq.stop()
         linux.stop()
+        if args.nat is not None:
+            nat = NAT(args.nat)
+            nat.stop()

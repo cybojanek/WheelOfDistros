@@ -6,9 +6,35 @@ import tarfile
 import time
 import urllib2
 
+def pretty_bytes(bytes, precision=2):
+    """Nicely format an amount of bytes to use units
 
-def download(url, output, checksum=None, progress=False):
-        """Download resources from the web
+    Arguments:
+    bytes - number of bytes
+    precision - number of decimal points
+
+    Return:
+    string of the format: "1.67 MB"
+
+    """
+    s = "%%.%sf %%s" % precision
+    if bytes == 0:
+        return s % (bytes, "B")
+    powers = [(2**40, "TB"), (2**30, "GB"), (2**20, "MB"), (2**10, "KB"), (1, "B")]
+    p = filter(lambda x: bytes >= x[0], powers)[0]
+    return s % (float(bytes) / p[0], p[1])
+
+
+def download(url, output, checksum=None):
+        """Download a URL from the web
+
+        Arguments:
+        url - url to download from
+        output - output file
+
+        Keyword Arguments:
+        checksum - check downloaded file md5 againt this
+
         """
         # Make directory if it doesn't exist
         directory = os.path.dirname(output)
@@ -22,7 +48,7 @@ def download(url, output, checksum=None, progress=False):
         downloaded, last_read, rate = 0, 0, 0.0
         block_size = 65536
         start = time.time()
-        print "Downloading: %.2f mB from: %s" % (size / 1048576.0, url)
+        print "Downloading: %s from: %s" % (pretty_bytes(size), url)
         destination = open(output, "wb")
         while True:
             buf = u.read(block_size)
@@ -33,10 +59,11 @@ def download(url, output, checksum=None, progress=False):
             p = float(downloaded) / float(size)
             end = time.time()
             if end - start > 1.0:
-                rate = (downloaded - last_read) / (end - start) / 1024
+                rate = (downloaded - last_read) / (end - start)
                 last_read = downloaded
                 start = end
-            print "%s    %05.2f %%    %.2f kB/s\r" % (file_name, p * 100.0, rate),
+            # TODO: fix whitespace on the right due to non-overwriting
+            print "%s    %05.2f %%    %s/s     \r" % (file_name, p * 100.0, pretty_bytes(rate)),
         print ""
         destination.close()
 

@@ -29,6 +29,15 @@ def pretty_bytes(bytes, precision=2):
 
 
 def checksum_file(f):
+    """Return the sha256 digest of the file
+
+    Arguments:
+    f - file path
+
+    Return:
+    sha256 hext digest string
+
+    """
     print "Validating checksum of: %s" % f
     file_name = os.path.basename(f)
     size = os.path.getsize(f)
@@ -65,7 +74,7 @@ def download_file(url, output, checksum=None):
         output - output file
 
         Keyword Arguments:
-        checksum - check downloaded file md5 againt this
+        checksum - check downloaded file sha256 againt this
 
         """
         # Make directory if it doesn't exist
@@ -214,8 +223,12 @@ class CentOS(LinuxDistro):
             subprocess.call(["hdiutil", "detach", directory],
                             stdout=subprocess.PIPE)
         elif sys.platform == "linux":
-            pass
-            # isoinfo
+            with open("%s/vmlinuz" % self.tftp_root, "wb") as output:
+                subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
+                                "/images/pxeboot/vmlinuz"], stdout=output)
+            with open("%s/initrd.img" % self.tftp_root, "wb") as output:
+                subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
+                                "/images/pxeboot/initrd.img"], stdout=output)
         # Copy syslinux files
         shutil.copy("syslinux/pxelinux.0", self.tftp_root)
         shutil.copy("syslinux/menu.c32", self.tftp_root)

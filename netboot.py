@@ -1,14 +1,49 @@
-#!/usr/bin/env python
+#!/usr/bin/env python -u
 import argparse
 import os
 import subprocess
 import tarfile
+import time
 import urllib2
+
+
+def download(url, output, checksum=None, progress=False):
+        """Download resources from the web
+        """
+        # Make directory if it doesn't exist
+        directory = os.path.dirname(output)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        # TODO: check if file exists and checksum - if ok, then don't download
+        # Download
+        file_name = url.split('/')[-1]
+        u = urllib2.urlopen(url)
+        size = int(u.info().getheaders("Content-Length")[0])
+        downloaded, last_read, rate = 0, 0, 0.0
+        block_size = 65536
+        start = time.time()
+        print "Downloading: %.2f mB from: %s" % (size / 1048576.0, url)
+        destination = open(output, "wb")
+        while True:
+            buf = u.read(block_size)
+            if not buf:
+                break
+            downloaded += len(buf)
+            destination.write(buf)
+            p = float(downloaded) / float(size)
+            end = time.time()
+            if end - start > 1.0:
+                rate = (downloaded - last_read) / (end - start) / 1024
+                last_read = downloaded
+                start = end
+            print "%s    %05.2f %%    %.2f kB/s\r" % (file_name, p * 100.0, rate),
+        print ""
+        destination.close()
 
 
 class LinuxDistro(object):
     """Abstracts a Linux Distribution
-    Expects that fetch, unpack and pre_run will be subclassed
+    Expects that fetch, unpack, start, and stop will be subclassed
 
     """
     def __init__(self, release, architecture):
@@ -34,8 +69,13 @@ class LinuxDistro(object):
         """
         raise NotImplementedError(type(self))
 
-    def pre_run(self):
+    def start(self):
         """Do anything else before running dnsmasq
+        """
+        raise NotImplementedError(type(self))
+
+    def stop(self):
+        """Do anything else after dnsmasq is stopped
         """
         raise NotImplementedError(type(self))
 
@@ -67,15 +107,8 @@ class Debian(LinuxDistro):
                                             self.architecture)
 
     def fetch(self):
-        # Make directory if it doesn't exist
-        if not os.path.exists(self.tftp_root):
-            os.makedirs(self.tftp_root)
-        # TODO: check if file exists and checksum - if ok, then don't download
-        # Download
-        print "Downloading: %s" % self.RESOURCE_URL % (self.release, self.architecture)
-        f = urllib2.urlopen(self.RESOURCE_URL % (self.release, self.architecture))
-        with open("%s/netboot.tar.gz" % self.tftp_root, "wb") as destination:
-            destination.write(f.read())
+        download(self.RESOURCE_URL % (self.release, self.architecture),
+                 "%s/netboot.tar.gz" % self.tftp_root)
 
     def unpack(self):
         # Unpack the downloaded tar file
@@ -83,8 +116,12 @@ class Debian(LinuxDistro):
         t = tarfile.open('%s/netboot.tar.gz' % self.tftp_root)
         t.extractall(self.tftp_root)
 
-    def pre_run(self):
+    def start(self):
         # Nothing to do here - we just need dnsmasq
+        pass
+
+    def stop(self):
+        # Nothin to do here - we just need dnsmasq
         pass
 
 
@@ -122,7 +159,7 @@ class DNSMasq(object):
         self.dhcp_boot = dhcp_boot
         self.dhcp_range = dhcp_range
 
-    def run(self):
+    def start(self):
         print "Running dnsmasq..."
         subprocess.call(["dnsmasq",
             "--pid-file=%s/dnsmasq.pid" % os.getcwd(),
@@ -132,6 +169,12 @@ class DNSMasq(object):
             "--enable-tftp", "--tftp-root=%s" % self.tftp_root,
             "--dhcp-range=%s" % self.dhcp_range,
             "--dhcp-boot=%s" % self.dhcp_boot])
+
+    @staticmethod
+    def stop():
+        print "Stopping dnsmasq..."
+        pid = open('%s/dnsmasq.pid' % os.getcwd()).read().rstrip()
+        subprocess.call(["kill", pid])
 
 DistroMapping = {"debian": Debian, "ubuntu": Ubuntu}
 
@@ -158,6 +201,8 @@ if __name__ == '__main__':
                             help="Download and unpack files")
     mode_group.add_argument("--serve", action='store_true', default=False,
                             help="Serve up files to netboot")
+    mode_group.add_argument("--stop", action='store_true', default=False,
+                            help="Stop everything")
 
     args = parser.parse_args()
 
@@ -166,6 +211,9 @@ if __name__ == '__main__':
         linux.fetch()
         linux.unpack()
     elif args.serve:
-        linux.pre_run()
+        linux.start()
         dnsmasq = DNSMasq(linux.tftp_root, "pxelinux.0", "10.1.0.100,10.1.0.200,12h")
-        dnsmasq.run()
+        dnsmasq.start()
+    elif args.stop:
+        DNSMasq.stop()
+        linux.stop()

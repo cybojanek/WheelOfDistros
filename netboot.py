@@ -1,6 +1,7 @@
 #!/usr/bin/env python -u
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -50,6 +51,10 @@ def download_file(url, output, checksum=None):
         block_size = 65536
         start = time.time()
         print "Downloading: %s from: %s" % (pretty_bytes(size), url)
+        print "Saving to: %s" % output
+        if os.path.isfile(output) and os.path.getsize(output) == size:
+            print "File size matches. Skipping download."
+            return
         destination = open(output, "wb")
         while True:
             buf = u.read(block_size)
@@ -126,6 +131,75 @@ class ArchLinux(LinuxDistro):
         pass
 
 
+class CentOS(LinuxDistro):
+    """docstring for CentOS"""
+
+    RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/CentOS-%s-%s-netinstall.iso"
+    RELEASES = {
+        "5.9": set(["i386", "x86_64"]),
+        "6.4": set(["i386", "x86_64"])
+    }
+
+    def __init__(self, release, architecture):
+        super(CentOS, self).__init__()
+        self.release = release
+        self.architecture = architecture
+        # Check that its a valid release
+        if self.release not in self.RELEASES:
+            raise Exception("No such %s release: %s" % (type(self), self.release))
+        # Check that the architecture is supported for that release
+        if self.architecture not in self.RELEASES[self.release]:
+            raise Exception("No architecture %s in release %s" % (
+                self.architecture, self.release))
+        self.tftp_root = "%s/root/centos/%s/%s" % (os.getcwd(), self.release,
+                                            self.architecture)
+
+    def fetch(self):
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      self.release, self.architecture),
+                      "%s/netinstall.iso" % self.tftp_root)
+
+    def unpack(self):
+        iso = "%s/netinstall.iso" % self.tftp_root
+        if sys.platform == "darwin":
+            directory = "%s/iso" % self.tftp_root
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            subprocess.call(["hdiutil", "attach", iso, "-mountpoint", directory])
+            shutil.copy("%s/images/pxeboot/vmlinuz" % directory, self.tftp_root)
+            shutil.copy("%s/images/pxeboot/initrd.img" % directory, self.tftp_root)
+            subprocess.call(["hdiutil", "detach", directory])
+        elif sys.platform == "linux":
+            pass
+            # isoinfo
+        # Copy syslinux files
+        shutil.copy("syslinux/pxelinux.0", self.tftp_root)
+        shutil.copy("syslinux/menu.c32", self.tftp_root)
+        # Write out the menu
+        directory = "%s/pxelinux.cfg" % self.tftp_root
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        with open('%s/default' % directory, 'w') as output:
+            output.write("""
+timeout 100
+default menu.c32
+
+menu title CentOS
+label 1
+    menu label ^1) Install CentOS
+    kernel vmlinux
+    append initrd=initrd.img devfs=nomount
+                """)
+
+    def start(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+    def stop(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+
 class Debian(LinuxDistro):
     """Debian Distribution"""
 
@@ -158,8 +232,8 @@ class Debian(LinuxDistro):
             raise Exception("No architecture %s in release %s" % (
                 self.architecture, self.release))
         # Set our tftp_root directory
-        self.tftp_root = "%s/root/%s/%s" % (os.getcwd(), self.release,
-                                            self.architecture)
+        self.tftp_root = "%s/root/debian/%s/%s" % (os.getcwd(), self.release,
+                                                   self.architecture)
         self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
@@ -206,6 +280,8 @@ class Ubuntu(Debian):
         # Change the url if we're a ported architecture
         if self.architecture in self.ARCHITECTURE_PORTS:
             self.RESOURCE_URL = self.RESOURCE_URL_PORTS
+        self.tftp_root = "%s/root/ubuntu/%s/%s" % (os.getcwd(), self.release,
+                                                   self.architecture)
 
 
 class DNSMasq(object):
@@ -279,7 +355,8 @@ class NAT(object):
                              self.interface, "-j", "MASQUERADE"])
 
 
-DistroMapping = {"debian": Debian, "ubuntu": Ubuntu, "archlinux": ArchLinux}
+DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
+                 "ubuntu": Ubuntu}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
@@ -292,6 +369,20 @@ if __name__ == '__main__':
     download = subcommands.add_parser("download")
     download.set_defaults(command="download")
     distros = download.add_subparsers(help="Distros")
+
+    ################### ArchLinux ###################
+    archlinux = distros.add_parser("archlinux")
+    archlinux.set_defaults(distro="archlinux")
+    ################### CentOS ###################
+    # Distro release
+    centos = distros.add_parser("centos")
+    centos.add_argument("release",
+                        choices=CentOS.RELEASES.keys(),
+                        help="Distribution version")
+    # Architecture
+    centos.add_argument("architecture",
+                        choices=set.union(*(CentOS.RELEASES.values())))
+    centos.set_defaults(distro="centos")
     ################### Debian ###################
     # Distro release
     debian = distros.add_parser("debian")
@@ -314,9 +405,6 @@ if __name__ == '__main__':
                         choices=set.union(*(Ubuntu.RELEASES.values())))
     ubuntu.set_defaults(distro="ubuntu")
 
-    ################### ArchLinux ###################
-    archlinux = distros.add_parser("archlinux")
-    archlinux.set_defaults(distro="archlinux")
 
     ############################################################################
     ################################### Serve ##################################
@@ -331,6 +419,20 @@ if __name__ == '__main__':
     serve.add_argument("--nat", required=False, help="Interface for NAT")
 
     distros = serve.add_subparsers(help="Distros")
+
+    ################### ArchLinux ###################
+    archlinux = distros.add_parser("archlinux")
+    archlinux.set_defaults(distro="archlinux")
+    ################### CentOS ###################
+    # Distro release
+    centos = distros.add_parser("centos")
+    centos.add_argument("release",
+                        choices=CentOS.RELEASES.keys(),
+                        help="Distribution version")
+    # Architecture
+    centos.add_argument("architecture",
+                        choices=set.union(*(CentOS.RELEASES.values())))
+    centos.set_defaults(distro="centos")
     ################### Debian ###################
     # Distro release
     debian = distros.add_parser("debian")
@@ -352,10 +454,6 @@ if __name__ == '__main__':
     ubuntu.add_argument("architecture",
                         choices=set.union(*(Ubuntu.RELEASES.values())))
     ubuntu.set_defaults(distro="ubuntu")
-
-    ################### ArchLinux ###################
-    archlinux = distros.add_parser("archlinux")
-    archlinux.set_defaults(distro="archlinux")
 
     ############################################################################
     ################################### Stop ###################################
@@ -372,7 +470,7 @@ if __name__ == '__main__':
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    elif args.distro in ('debian', 'ubuntu'):
+    elif args.distro in ('centos', 'debian', 'ubuntu'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
 
     if args.command == "download":

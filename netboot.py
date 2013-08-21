@@ -107,6 +107,28 @@ class LinuxDistro(object):
         raise NotImplementedError(type(self))
 
 
+class ArchLinux(LinuxDistro):
+    """docstring for ArchLinux"""
+    def __init__(self):
+        super(ArchLinux, self).__init__(None, None)
+        self.tftp_root = "%s/root/archlinux/" % (os.getcwd())
+        self.dhcp_boot = "ipxe.pxe"
+
+    def fetch(self):
+        download("https://releng.archlinux.org/pxeboot/ipxe.pxe", "%s/ipxe.pxe")
+
+    def unpack(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+    def start(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+    def stop(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
 class Debian(LinuxDistro):
     """Debian Distribution"""
 
@@ -132,6 +154,7 @@ class Debian(LinuxDistro):
         # Set our tftp_root directory
         self.tftp_root = "%s/root/%s/%s" % (os.getcwd(), self.release,
                                             self.architecture)
+        self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
         download(self.RESOURCE_URL % (self.release, self.architecture),
@@ -148,7 +171,7 @@ class Debian(LinuxDistro):
         pass
 
     def stop(self):
-        # Nothin to do here - we just need dnsmasq
+        # Nothing to do here - we just need dnsmasq
         pass
 
 
@@ -158,6 +181,7 @@ class Ubuntu(Debian):
     RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
     
     # Ported architectures have a different download url
+    # TODO: uhhh ppc doesn't use netboot.tar.gz
     RESOURCE_URL_PORTS = "http://ports.ubuntu.com/ubuntu-ports/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
     ARCHITECTURE_PORTS = set(["powerpc", "powerpc64", "e500", "e500mc"])
 
@@ -203,24 +227,41 @@ class DNSMasq(object):
         pid = open('%s/dnsmasq.pid' % os.getcwd()).read().rstrip()
         subprocess.call(["kill", pid])
 
-DistroMapping = {"debian": Debian, "ubuntu": Ubuntu}
+DistroMapping = {"debian": Debian, "ubuntu": Ubuntu, "archlinux": ArchLinux}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
 
-    # Linux Distro
-    parser.add_argument("--distro", required=True,
-                        choices=DistroMapping.keys(),
-                        help="Linux Distribution")
+    subparsers = parser.add_subparsers(help="Distros")
+
+
+    ################### Debian ###################
     # Distro release
-    parser.add_argument("--release", required=True,
-                        choices=Debian.RELEASES.keys() + Ubuntu.RELEASES.keys(),
+    debian = subparsers.add_parser("debian")
+    debian.add_argument("--release", required=False,
+                        choices=Debian.RELEASES.keys(),
                         help="Distribution version")
     # Architecture
-    parser.add_argument("--architecture", required=True,
-                        choices=set.union(*(Debian.RELEASES.values() + 
-                                            Ubuntu.RELEASES.values())))
-    # Wow...what just happned hereeeeeeee ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    debian.add_argument("--architecture", required=False,
+                        choices=set.union(*(Debian.RELEASES.values())))
+    debian.set_defaults(distro="debian")
+
+    ################### Ubuntu ###################
+    # Distro release
+    ubuntu = subparsers.add_parser("ubuntu")
+    ubuntu.add_argument("--release", required=False,
+                        choices=Ubuntu.RELEASES.keys(),
+                        help="Distribution version")
+    # Architecture
+    ubuntu.add_argument("--architecture", required=False,
+                        choices=set.union(*(Ubuntu.RELEASES.values())))
+    ubuntu.set_defaults(distro="ubuntu")
+
+
+    ################### ArchLinux ###################
+    archlinux = subparsers.add_parser("archlinux")
+    archlinux.set_defaults(distro="archlinux")
+
 
     # Download or serve
     mode_group = parser.add_mutually_exclusive_group(required=True)
@@ -233,13 +274,17 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    linux = DistroMapping[args.distro](args.release, args.architecture)
+    if args.distro == 'archlinux':
+        linux = DistroMapping[args.distro]()
+    else:
+        linux = DistroMapping[args.distro](args.release, args.architecture)
+
     if args.download:
         linux.fetch()
         linux.unpack()
     elif args.serve:
         linux.start()
-        dnsmasq = DNSMasq(linux.tftp_root, "pxelinux.0", "10.1.0.100,10.1.0.200,12h")
+        dnsmasq = DNSMasq(linux.tftp_root, linux.dhcp_boot, "10.1.0.100,10.1.0.200,12h")
         dnsmasq.start()
     elif args.stop:
         DNSMasq.stop()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python -u
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -27,6 +28,35 @@ def pretty_bytes(bytes, precision=2):
     return s % (float(bytes) / p[0], p[1])
 
 
+def checksum_file(f):
+    print "Validating checksum of: %s" % f
+    file_name = os.path.basename(f)
+    size = os.path.getsize(f)
+    sha = hashlib.sha256()
+    block_size = 65536
+    input_file = open(f, "rb")
+    checked, last_read, rate, time_left = 0, 0, 0.0, 0
+    start = time.time()
+    while True:
+        buf = input_file.read(block_size)
+        if not buf:
+            break
+        checked += len(buf)
+        sha.update(buf)
+        p = float(checked) / float(size)
+        end = time.time()
+        if end - start > 0.5:
+            rate = (checked - last_read) / (end - start)
+            last_read = checked
+            start = end
+            time_left = int((size - checked) / rate)
+        # TODO: fix whitespace on the right due to non-overwriting
+        print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
+            file_name, p * 100.0, time_left / 3600, time_left / 60,
+            time_left % 60, pretty_bytes(rate)),
+    print ""
+    return sha.hexdigest()
+
 def download_file(url, output, checksum=None):
         """Download a URL from the web
 
@@ -47,14 +77,22 @@ def download_file(url, output, checksum=None):
         file_name = url.split('/')[-1]
         u = urllib2.urlopen(url)
         size = int(u.info().getheaders("Content-Length")[0])
-        downloaded, last_read, rate = 0, 0, 0.0
+        downloaded, last_read, rate, time_left = 0, 0, 0.0, 0
         block_size = 65536
         start = time.time()
         print "Downloading: %s from: %s" % (pretty_bytes(size), url)
         print "Saving to: %s" % output
         if os.path.isfile(output) and os.path.getsize(output) == size:
-            print "File size matches. Skipping download."
-            return
+            if checksum is None:
+                print "File size matches. Skipping download."
+                return
+            else:
+                print "File size matches. Skipping download."
+                if checksum_file(output) != checksum:
+                    print "Checksum doesn't match redownloading..."
+                else:
+                    print "Checksum validates. Skipping download."
+                    return
         destination = open(output, "wb")
         while True:
             buf = u.read(block_size)
@@ -64,15 +102,19 @@ def download_file(url, output, checksum=None):
             destination.write(buf)
             p = float(downloaded) / float(size)
             end = time.time()
-            if end - start > 1.0:
+            if end - start > 0.5:
                 rate = (downloaded - last_read) / (end - start)
                 last_read = downloaded
                 start = end
+                time_left = int((size - downloaded) / rate)
             # TODO: fix whitespace on the right due to non-overwriting
-            print "%s    %05.2f %%    %s/s     \r" % (file_name, p * 100.0,
-                                                      pretty_bytes(rate)),
+            print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
+                file_name, p * 100.0, time_left / 3600, time_left / 60,
+                time_left % 60, pretty_bytes(rate)),
         print ""
         destination.close()
+        if checksum and checksum_file(output) != checksum:
+            raise Exception("Checksum didn't validate")
 
 
 class LinuxDistro(object):
@@ -111,7 +153,7 @@ class LinuxDistro(object):
 class ArchLinux(LinuxDistro):
     """docstring for ArchLinux"""
     def __init__(self):
-        super(ArchLinux, self).__init__(None, None)
+        super(ArchLinux, self).__init__()
         self.tftp_root = "%s/root/archlinux/" % (os.getcwd())
         self.dhcp_boot = "ipxe.pxe"
 
@@ -165,10 +207,12 @@ class CentOS(LinuxDistro):
             directory = "%s/iso" % self.tftp_root
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            subprocess.call(["hdiutil", "attach", iso, "-mountpoint", directory])
+            subprocess.call(["hdiutil", "attach", iso, "-mountpoint", directory],
+                            stdout=subprocess.PIPE)
             shutil.copy("%s/images/pxeboot/vmlinuz" % directory, self.tftp_root)
             shutil.copy("%s/images/pxeboot/initrd.img" % directory, self.tftp_root)
-            subprocess.call(["hdiutil", "detach", directory])
+            subprocess.call(["hdiutil", "detach", directory],
+                            stdout=subprocess.PIPE)
         elif sys.platform == "linux":
             pass
             # isoinfo
@@ -205,12 +249,10 @@ class Debian(LinuxDistro):
 
     RESOURCE_URL = "http://ftp.nl.debian.org/debian/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
     RELEASES = {
-        "squeeze": set(["amd64", "armel", "i386", "ia64", "kfreebsd-amd64",
-                        "kfreebsd-i386", "mips", "mipsel", "powerpc", "s390",
-                        "sparc"]),
-        "wheezy": set(["amd64", "armel", "armhf", "i386", "ia64",
-                       "kfreebsd-amd64", "kfreebsd-i386", "mips", "mipsel",
-                       "powerpc", "s390", "s390x" "sparc"])
+        "squeeze": set(["amd64", "i386", "ia64", "kfreebsd-amd64",
+                        "kfreebsd-i386"]),
+        "wheezy": set(["amd64", "i386", "ia64", "kfreebsd-amd64",
+                       "kfreebsd-i386"])
     }
 
     def __init__(self, release, architecture):
@@ -259,27 +301,19 @@ class Ubuntu(Debian):
     """Ubuntu Distribution"""
 
     RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
-    
-    # Ported architectures have a different download url
-    # TODO: uhhh ppc doesn't use netboot.tar.gz
-    RESOURCE_URL_PORTS = "http://ports.ubuntu.com/ubuntu-ports/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
-    ARCHITECTURE_PORTS = set(["powerpc", "powerpc64", "e500", "e500mc"])
 
     RELEASES = {
-        "hardy": set(["amd64", "i386", "powerpc", "powerpc64"]),
-        "lucid": set(["amd64", "i386", "powerpc", "powerpc64"]),
-        "oneiric": set(["amd64", "i386", "powerpc", "powerpc64"]),
-        "precise": set(["amd64", "i386", "powerpc", "powerpc64"]),
-        "quantal": set(["amd64", "i386", "powerpc", "powerpc64"]),
-        "raring": set(["amd64", "i386", "powerpc", "powerpc64", "e500", "e500mc"]),
-        "saucy": set(["amd64", "i386", "powerpc", "powerpc64", "e500", "e500mc"])
+        "hardy": set(["amd64", "i386"]),
+        "lucid": set(["amd64", "i386"]),
+        "oneiric": set(["amd64", "i386"]),
+        "precise": set(["amd64", "i386"]),
+        "quantal": set(["amd64", "i386"]),
+        "raring": set(["amd64", "i386"]),
+        "saucy": set(["amd64", "i386"])
     }
 
     def __init__(self, *args):
         super(Ubuntu, self).__init__(*args)
-        # Change the url if we're a ported architecture
-        if self.architecture in self.ARCHITECTURE_PORTS:
-            self.RESOURCE_URL = self.RESOURCE_URL_PORTS
         self.tftp_root = "%s/root/ubuntu/%s/%s" % (os.getcwd(), self.release,
                                                    self.architecture)
 

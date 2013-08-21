@@ -26,7 +26,7 @@ def pretty_bytes(bytes, precision=2):
     return s % (float(bytes) / p[0], p[1])
 
 
-def download(url, output, checksum=None):
+def download_file(url, output, checksum=None):
         """Download a URL from the web
 
         Arguments:
@@ -111,7 +111,7 @@ class ArchLinux(LinuxDistro):
         self.dhcp_boot = "ipxe.pxe"
 
     def fetch(self):
-        download("https://releng.archlinux.org/pxeboot/ipxe.pxe", "%s/ipxe.pxe")
+        download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe", "%s/ipxe.pxe")
 
     def unpack(self):
         # Nothing to do here - we just need dnsmasq
@@ -163,7 +163,7 @@ class Debian(LinuxDistro):
         self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
-        download(self.RESOURCE_URL % (self.release, self.architecture),
+        download_file(self.RESOURCE_URL % (self.release, self.architecture),
                  "%s/netboot.tar.gz" % self.tftp_root)
 
     def unpack(self):
@@ -210,24 +210,26 @@ class Ubuntu(Debian):
 
 class DNSMasq(object):
     """docstring for DNSMasq"""
-    def __init__(self, interface, tftp_root, dhcp_boot, dhcp_range):
+    def __init__(self, tftp_root, dhcp_boot, dhcp_range, interface=None):
         super(DNSMasq, self).__init__()
-        self.interface = interface
         self.tftp_root = tftp_root
         self.dhcp_boot = dhcp_boot
         self.dhcp_range = dhcp_range
+        self.interface = interface
 
     def start(self):
         print "Running dnsmasq..."
-        subprocess.call(["dnsmasq",
-            "--interface=%s" % self.interface,
-            "--pid-file=%s/dnsmasq.pid" % os.getcwd(),
-            "--log-facility=%s/dnsmasq.log" % os.getcwd(),
-            "--dhcp-leasefile=%s/dnsmasq.leases" % os.getcwd(),
-            "--conf-file=/dev/null",
-            "--enable-tftp", "--tftp-root=%s" % self.tftp_root,
-            "--dhcp-range=%s" % self.dhcp_range,
-            "--dhcp-boot=%s" % self.dhcp_boot])
+        args = ["dnsmasq",
+                "--pid-file=%s/dnsmasq.pid" % os.getcwd(),
+                "--log-facility=%s/dnsmasq.log" % os.getcwd(),
+                "--dhcp-leasefile=%s/dnsmasq.leases" % os.getcwd(),
+                "--conf-file=/dev/null",
+                "--enable-tftp", "--tftp-root=%s" % self.tftp_root,
+                "--dhcp-range=%s" % self.dhcp_range,
+                "--dhcp-boot=%s" % self.dhcp_boot]
+        if self.interface is not None:
+            args = args + ["--interface=%s" % self.interface]
+        subprocess.call(args)
 
     @staticmethod
     def stop():
@@ -264,7 +266,8 @@ class NAT(object):
             subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o",
                              self.interface, "-j", "MASQUERADE"])
 
-    def stop(self):
+    @staticmethod
+    def stop():
         if sys.platform == 'darwin':
             subprocess.call(["sysctl", "-w", "net.inet.ip.forwarding=0"])
             subprocess.call(["killall", "-9", "natd"])
@@ -281,79 +284,108 @@ DistroMapping = {"debian": Debian, "ubuntu": Ubuntu, "archlinux": ArchLinux}
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
 
-    subparsers = parser.add_subparsers(help="Distros")
+    subcommands = parser.add_subparsers(help="Commands")
 
-
+    ############################################################################
+    ################################# Download #################################
+    ############################################################################
+    download = subcommands.add_parser("download")
+    download.set_defaults(command="download")
+    distros = download.add_subparsers(help="Distros")
     ################### Debian ###################
     # Distro release
-    debian = subparsers.add_parser("debian")
-    debian.add_argument("--release", required=False,
+    debian = distros.add_parser("debian")
+    debian.add_argument("release",
                         choices=Debian.RELEASES.keys(),
                         help="Distribution version")
     # Architecture
-    debian.add_argument("--architecture", required=False,
+    debian.add_argument("architecture",
                         choices=set.union(*(Debian.RELEASES.values())))
     debian.set_defaults(distro="debian")
 
     ################### Ubuntu ###################
     # Distro release
-    ubuntu = subparsers.add_parser("ubuntu")
-    ubuntu.add_argument("--release", required=False,
+    ubuntu = distros.add_parser("ubuntu")
+    ubuntu.add_argument("release",
                         choices=Ubuntu.RELEASES.keys(),
                         help="Distribution version")
     # Architecture
-    ubuntu.add_argument("--architecture", required=False,
+    ubuntu.add_argument("architecture",
                         choices=set.union(*(Ubuntu.RELEASES.values())))
     ubuntu.set_defaults(distro="ubuntu")
 
-
     ################### ArchLinux ###################
-    archlinux = subparsers.add_parser("archlinux")
+    archlinux = distros.add_parser("archlinux")
     archlinux.set_defaults(distro="archlinux")
 
-
+    ############################################################################
+    ################################### Serve ##################################
+    ############################################################################
+    serve = subcommands.add_parser("serve")
+    serve.set_defaults(command="serve")
 
     # dnsmasq interface
-    parser.add_argument("--interface", required=True,
-                        help="Interface to serve dhcp and tftp")
+    serve.add_argument("--interface", required=False,
+                       help="Interface to serve dhcp and tftp")
     # NAT interface
-    parser.add_argument("--nat", required=False, help="Interface for NAT")
+    serve.add_argument("--nat", required=False, help="Interface for NAT")
 
-    # Download or serve
-    mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument("--download", action='store_true', default=False,
-                            help="Download and unpack files")
-    mode_group.add_argument("--serve", action='store_true', default=False,
-                            help="Serve up files to netboot")
-    mode_group.add_argument("--stop", action='store_true', default=False,
-                            help="Stop everything")
+    distros = serve.add_subparsers(help="Distros")
+    ################### Debian ###################
+    # Distro release
+    debian = distros.add_parser("debian")
+    debian.add_argument("release",
+                        choices=Debian.RELEASES.keys(),
+                        help="Distribution version")
+    # Architecture
+    debian.add_argument("architecture",
+                        choices=set.union(*(Debian.RELEASES.values())))
+    debian.set_defaults(distro="debian")
+
+    ################### Ubuntu ###################
+    # Distro release
+    ubuntu = distros.add_parser("ubuntu")
+    ubuntu.add_argument("release",
+                        choices=Ubuntu.RELEASES.keys(),
+                        help="Distribution version")
+    # Architecture
+    ubuntu.add_argument("architecture",
+                        choices=set.union(*(Ubuntu.RELEASES.values())))
+    ubuntu.set_defaults(distro="ubuntu")
+
+    ################### ArchLinux ###################
+    archlinux = distros.add_parser("archlinux")
+    archlinux.set_defaults(distro="archlinux")
+
+    ############################################################################
+    ################################### Stop ###################################
+    ############################################################################
+    stop = subcommands.add_parser("stop")
+    stop.set_defaults(command="stop", distro=None)
 
     args = parser.parse_args()
 
     # Check for root
-    if (args.serve or args.stop) and os.getuid() != 0:
+    if args.command in ("serve", "stop") and os.getuid() != 0:
         print "Need root priveleges to serve/stop"
         sys.exit(1)
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    else:
+    elif args.distro in ('debian', 'ubuntu'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
 
-    if args.download:
+    if args.command == "download":
         linux.fetch()
         linux.unpack()
-    elif args.serve:
+    elif args.command == "serve":
         if args.nat is not None:
             nat = NAT(args.nat)
             nat.start()
         linux.start()
-        dnsmasq = DNSMasq(args.interface, linux.tftp_root, linux.dhcp_boot,
-                          "10.1.0.100,10.1.0.200,12h")
+        dnsmasq = DNSMasq(linux.tftp_root, linux.dhcp_boot,
+                          "10.1.0.100,10.1.0.200,12h", interface=args.interface)
         dnsmasq.start()
-    elif args.stop:
+    elif args.command == "stop":
         DNSMasq.stop()
-        linux.stop()
-        if args.nat is not None:
-            nat = NAT(args.nat)
-            nat.stop()
+        NAT.stop()

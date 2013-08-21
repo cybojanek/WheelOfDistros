@@ -10,13 +10,21 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 
 # Supported Distros
 
-* Ubuntu
+* ArchLinux
 
 * Debian
+
+* Ubuntu
 
 # Usage
 
 ```
-./netboot.py --distro debian --release squeeze --architecture amd64 --download
-sudo ./netboot.py --distro debian --release squeeze --architecture amd64 --serve
+# Help menu
+./netboot.py --help
+# Download an image
+./netboot.py download debian squeeze amd64
+# Serve it up, and optional internet as well
+sudo ./netboot.py serve --nat en0 debian squeeze amd64
+# Stop everything
+sudo ./netboot.py stop
 ```

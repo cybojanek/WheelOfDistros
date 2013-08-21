@@ -9,6 +9,7 @@ import tarfile
 import time
 import urllib2
 
+
 def pretty_bytes(bytes, precision=2):
     """Nicely format an amount of bytes to use units
 
@@ -23,7 +24,8 @@ def pretty_bytes(bytes, precision=2):
     s = "%%.%sf %%s" % precision
     if bytes == 0:
         return s % (bytes, "B")
-    powers = [(2**40, "TB"), (2**30, "GB"), (2**20, "MB"), (2**10, "KB"), (1, "B")]
+    powers = [(2**40, "TB"), (2**30, "GB"), (2**20, "MB"), (2**10, "KB"),
+              (1, "B")]
     p = filter(lambda x: bytes >= x[0], powers)[0]
     return s % (float(bytes) / p[0], p[1])
 
@@ -65,6 +67,7 @@ def checksum_file(f):
             time_left % 60, pretty_bytes(rate)),
     print ""
     return sha.hexdigest()
+
 
 def download_file(url, output, checksum=None):
         """Download a URL from the web
@@ -167,7 +170,8 @@ class ArchLinux(LinuxDistro):
         self.dhcp_boot = "ipxe.pxe"
 
     def fetch(self):
-        download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe", "%s/ipxe.pxe")
+        download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe",
+                      "%s/ipxe.pxe")
 
     def unpack(self):
         # Nothing to do here - we just need dnsmasq
@@ -185,7 +189,8 @@ class ArchLinux(LinuxDistro):
 class CentOS(LinuxDistro):
     """docstring for CentOS"""
 
-    RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/CentOS-%s-%s-netinstall.iso"
+    RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/" \
+                   "CentOS-%s-%s-netinstall.iso"
     RELEASES = {
         "5.9": set(["i386", "x86_64"]),
         "6.4": set(["i386", "x86_64"])
@@ -197,13 +202,14 @@ class CentOS(LinuxDistro):
         self.architecture = architecture
         # Check that its a valid release
         if self.release not in self.RELEASES:
-            raise Exception("No such %s release: %s" % (type(self), self.release))
+            raise Exception("No such %s release: %s" % (type(self),
+                                                        self.release))
         # Check that the architecture is supported for that release
         if self.architecture not in self.RELEASES[self.release]:
             raise Exception("No architecture %s in release %s" % (
                 self.architecture, self.release))
         self.tftp_root = "%s/root/centos/%s/%s" % (os.getcwd(), self.release,
-                                            self.architecture)
+                                                   self.architecture)
 
     def fetch(self):
         download_file(self.RESOURCE_URL % (self.release, self.architecture,
@@ -216,10 +222,12 @@ class CentOS(LinuxDistro):
             directory = "%s/iso" % self.tftp_root
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            subprocess.call(["hdiutil", "attach", iso, "-mountpoint", directory],
-                            stdout=subprocess.PIPE)
-            shutil.copy("%s/images/pxeboot/vmlinuz" % directory, self.tftp_root)
-            shutil.copy("%s/images/pxeboot/initrd.img" % directory, self.tftp_root)
+            subprocess.call(["hdiutil", "attach", iso, "-mountpoint",
+                            directory], stdout=subprocess.PIPE)
+            shutil.copy("%s/images/pxeboot/vmlinuz" % directory,
+                        self.tftp_root)
+            shutil.copy("%s/images/pxeboot/initrd.img" % directory,
+                        self.tftp_root)
             subprocess.call(["hdiutil", "detach", directory],
                             stdout=subprocess.PIPE)
         elif sys.platform == "linux":
@@ -260,7 +268,9 @@ label 1
 class Debian(LinuxDistro):
     """Debian Distribution"""
 
-    RESOURCE_URL = "http://ftp.nl.debian.org/debian/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
+    RESOURCE_URL = "http://ftp.nl.debian.org/debian/dists/%s/main/" \
+                   "installer-%s/current/images/netboot/netboot.tar.gz"
+
     RELEASES = {
         "squeeze": set(["amd64", "i386", "ia64", "kfreebsd-amd64",
                         "kfreebsd-i386"]),
@@ -281,7 +291,8 @@ class Debian(LinuxDistro):
         self.architecture = architecture
         # Check that its a valid release
         if self.release not in self.RELEASES:
-            raise Exception("No such %s release: %s" % (type(self), self.release))
+            raise Exception("No such %s release: %s" % (
+                type(self), self.release))
         # Check that the architecture is supported for that release
         if self.architecture not in self.RELEASES[self.release]:
             raise Exception("No architecture %s in release %s" % (
@@ -293,7 +304,7 @@ class Debian(LinuxDistro):
 
     def fetch(self):
         download_file(self.RESOURCE_URL % (self.release, self.architecture),
-                 "%s/netboot.tar.gz" % self.tftp_root)
+                      "%s/netboot.tar.gz" % self.tftp_root)
 
     def unpack(self):
         # Unpack the downloaded tar file
@@ -313,7 +324,8 @@ class Debian(LinuxDistro):
 class Ubuntu(Debian):
     """Ubuntu Distribution"""
 
-    RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main/installer-%s/current/images/netboot/netboot.tar.gz"
+    RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main/" \
+                   "installer-%s/current/images/netboot/netboot.tar.gz"
 
     RELEASES = {
         "hardy": set(["amd64", "i386"]),
@@ -386,8 +398,8 @@ class NAT(object):
                              "any", "to", "any", "via", self.interface])
         elif sys.platform == 'linux':
             subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=1"])
-            subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o",
-                             self.interface, "-j", "MASQUERADE"])
+            subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING",
+                             "-o", self.interface, "-j", "MASQUERADE"])
 
     @staticmethod
     def stop():
@@ -398,8 +410,8 @@ class NAT(object):
         elif sys.platform == 'linux':
             subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=0"])
             # TODO: change this to remove
-            subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o",
-                             self.interface, "-j", "MASQUERADE"])
+            # subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING",
+                             # "-o", self.interface, "-j", "MASQUERADE"])
 
 
 DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
@@ -410,9 +422,9 @@ if __name__ == '__main__':
 
     subcommands = parser.add_subparsers(help="Commands")
 
-    ############################################################################
-    ################################# Download #################################
-    ############################################################################
+    ###########################################################################
+    ################################# Download ################################
+    ###########################################################################
     download = subcommands.add_parser("download")
     download.set_defaults(command="download")
     distros = download.add_subparsers(help="Distros")
@@ -452,10 +464,9 @@ if __name__ == '__main__':
                         choices=set.union(*(Ubuntu.RELEASES.values())))
     ubuntu.set_defaults(distro="ubuntu")
 
-
-    ############################################################################
-    ################################### Serve ##################################
-    ############################################################################
+    ###########################################################################
+    ################################### Serve #################################
+    ###########################################################################
     serve = subcommands.add_parser("serve")
     serve.set_defaults(command="serve")
 
@@ -502,9 +513,9 @@ if __name__ == '__main__':
                         choices=set.union(*(Ubuntu.RELEASES.values())))
     ubuntu.set_defaults(distro="ubuntu")
 
-    ############################################################################
-    ################################### Stop ###################################
-    ############################################################################
+    ###########################################################################
+    ################################### Stop ##################################
+    ###########################################################################
     stop = subcommands.add_parser("stop")
     stop.set_defaults(command="stop", distro=None)
 
@@ -529,7 +540,8 @@ if __name__ == '__main__':
             nat.start()
         linux.start()
         dnsmasq = DNSMasq(linux.tftp_root, linux.dhcp_boot,
-                          "10.1.0.100,10.1.0.200,12h", interface=args.interface)
+                          "10.1.0.100,10.1.0.200,12h",
+                          interface=args.interface)
         dnsmasq.start()
     elif args.command == "stop":
         DNSMasq.stop()

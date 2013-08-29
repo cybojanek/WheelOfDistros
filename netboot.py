@@ -240,9 +240,8 @@ class CentOS(LinuxDistro):
                 subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
                                 "/images/pxeboot/initrd.img"], stdout=output)
         # Copy syslinux files
-        for x in ["pxelinux.0", "menu.c32", "ldlinux.c32", "libutil.c32"]:
-            print "Copying syslinux file: %s" % x
-            shutil.copy("syslinux/%s" % x, self.tftp_root)
+        print "Copying pxelinux.0"
+        shutil.copy("syslinux/pxelinux.0", self.tftp_root)
 
         # Write out the menu
         directory = "%s/pxelinux.cfg" % self.tftp_root
@@ -250,12 +249,9 @@ class CentOS(LinuxDistro):
             os.makedirs(directory)
 
         kernel_string = """
-timeout 100
-default menu.c32
+default linux
 
-menu title CentOS
-label 1
-    menu label ^1) Install CentOS
+label linux
     kernel vmlinuz method=http://mirror.centos.org/centos/6/os/%s/
     append initrd=initrd.img devfs=nomount
                 """ % self.architecture
@@ -479,7 +475,7 @@ if __name__ == '__main__':
     serve.set_defaults(command="serve")
 
     # dnsmasq interface
-    serve.add_argument("--interface", required=False,
+    serve.add_argument("--interface", required=True,
                        help="Interface to serve dhcp and tftp")
     # NAT interface
     serve.add_argument("--nat", required=False, help="Interface for NAT")

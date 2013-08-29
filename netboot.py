@@ -171,7 +171,7 @@ class ArchLinux(LinuxDistro):
 
     def fetch(self):
         download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe",
-                      "%s/ipxe.pxe")
+                      "%s/ipxe.pxe" % self.tftp_root)
 
     def unpack(self):
         # Nothing to do here - we just need dnsmasq
@@ -210,6 +210,7 @@ class CentOS(LinuxDistro):
                 self.architecture, self.release))
         self.tftp_root = "%s/root/centos/%s/%s" % (os.getcwd(), self.release,
                                                    self.architecture)
+        self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
         download_file(self.RESOURCE_URL % (self.release, self.architecture,
@@ -218,6 +219,7 @@ class CentOS(LinuxDistro):
 
     def unpack(self):
         iso = "%s/netinstall.iso" % self.tftp_root
+        print "Extracting pxeboot from: %s" % iso
         if sys.platform == "darwin":
             directory = "%s/iso" % self.tftp_root
             if not os.path.exists(directory):
@@ -238,23 +240,29 @@ class CentOS(LinuxDistro):
                 subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
                                 "/images/pxeboot/initrd.img"], stdout=output)
         # Copy syslinux files
-        shutil.copy("syslinux/pxelinux.0", self.tftp_root)
-        shutil.copy("syslinux/menu.c32", self.tftp_root)
+        for x in ["pxelinux.0", "menu.c32", "ldlinux.c32", "libutil.c32"]:
+            print "Copying syslinux file: %s" % x
+            shutil.copy("syslinux/%s" % x, self.tftp_root)
+
         # Write out the menu
         directory = "%s/pxelinux.cfg" % self.tftp_root
         if not os.path.exists(directory):
             os.makedirs(directory)
-        with open('%s/default' % directory, 'w') as output:
-            output.write("""
+
+        kernel_string = """
 timeout 100
 default menu.c32
 
 menu title CentOS
 label 1
     menu label ^1) Install CentOS
-    kernel vmlinux
+    kernel vmlinuz method=http://mirror.centos.org/centos/6/os/%s/
     append initrd=initrd.img devfs=nomount
-                """)
+                """ % self.architecture
+
+        print "Writing default kernel boot: %s" % kernel_string
+        with open('%s/default' % directory, 'w') as output:
+            output.write(kernel_string)
 
     def start(self):
         # Nothing to do here - we just need dnsmasq

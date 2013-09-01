@@ -30,20 +30,30 @@ def pretty_bytes(bytes, precision=2):
     return s % (float(bytes) / p[0], p[1])
 
 
-def checksum_file(f):
-    """Return the sha256 digest of the file
+def checksum_file(f, checksum_type="sha256"):
+    """Return the hash digest of the file
 
     Arguments:
     f - file path
+
+    Keyword Arguments:
+    checksum_type - one of md5, sha1, sha224, sha256, sha384, sha512
 
     Return:
     sha256 hext digest string
 
     """
+    hashes = {"md5": hashlib.md5, "sha1": hashlib.sha1,
+              "sha224": hashlib.sha224, "sha256": hashlib.sha256,
+              "sha384": hashlib.sha384, "sha512": hashlib.sha512}
+
+    if checksum_type not in hashes:
+        raise Exception("Unsupported hash type: %s" % checksum_type)
+
     print "Validating checksum of: %s" % f
     file_name = os.path.basename(f)
     size = os.path.getsize(f)
-    sha = hashlib.sha256()
+    h = hashes[checksum_type]()
     block_size = 65536
     input_file = open(f, "rb")
     checked, last_read, rate, time_left = 0, 0, 0.0, 0
@@ -53,7 +63,7 @@ def checksum_file(f):
         if not buf:
             break
         checked += len(buf)
-        sha.update(buf)
+        h.update(buf)
         p = float(checked) / float(size)
         end = time.time()
         if end - start > 0.5:
@@ -66,10 +76,10 @@ def checksum_file(f):
             file_name, p * 100.0, time_left / 3600, time_left / 60,
             time_left % 60, pretty_bytes(rate)),
     print ""
-    return sha.hexdigest()
+    return h.hexdigest()
 
 
-def download_file(url, output, checksum=None):
+def download_file(url, output, checksum=None, checksum_type="sha256"):
         """Download a URL from the web
 
         Arguments:
@@ -100,7 +110,8 @@ def download_file(url, output, checksum=None):
                 return
             else:
                 print "File size matches. Skipping download."
-                if checksum_file(output) != checksum:
+                cf = checksum_file(output, checksum_type=checksum_type)
+                if cf != checksum:
                     print "Checksum doesn't match redownloading..."
                 else:
                     print "Checksum validates. Skipping download."
@@ -125,8 +136,10 @@ def download_file(url, output, checksum=None):
                 time_left % 60, pretty_bytes(rate)),
         print ""
         destination.close()
-        if checksum and checksum_file(output) != checksum:
-            raise Exception("Checksum didn't validate")
+        cf = checksum_file(output, checksum_type=checksum_type)
+        if checksum and cf != checksum:
+            raise Exception("Checksum didn't validate: %s != %s"
+                            "" % (checksum, cf))
 
 
 class LinuxDistro(object):
@@ -166,12 +179,15 @@ class ArchLinux(LinuxDistro):
     """docstring for ArchLinux"""
     def __init__(self):
         super(ArchLinux, self).__init__()
-        self.tftp_root = "%s/root/archlinux/" % (os.getcwd())
+        self.tftp_root = "%s/root/archlinux" % (os.getcwd())
         self.dhcp_boot = "ipxe.pxe"
 
     def fetch(self):
+        # WARNING: this might easily break since archlinux is rolling...
         download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe",
-                      "%s/ipxe.pxe" % self.tftp_root)
+                      "%s/ipxe.pxe" % self.tftp_root,
+                      checksum="2d0c3d05cff23e2382f19c68902554c7388d642e38a9a32895db5b890cca4071",
+                      checksum_type="sha256")
 
     def unpack(self):
         # Nothing to do here - we just need dnsmasq
@@ -192,8 +208,14 @@ class CentOS(LinuxDistro):
     RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/" \
                    "CentOS-%s-%s-netinstall.iso"
     RELEASES = {
-        "5.9": set(["i386", "x86_64"]),
-        "6.4": set(["i386", "x86_64"])
+        "5.9": {
+            "i386": ("7676fd259076ce1516142d7be7e2f569a1ec70b08965af9a570680c21705a4c1", "sha256"),
+            "x86_64": ("0f6d85b6a866c50fc89185f0402cb0fe0d942c62832b9359ca07eec3f6ea6ed8" "sha256")
+        },
+        "6.4": {
+            "i386": ("1c32d5414559ff54a35b08b1dfb094a5cb0b0586fcb7e2116015f185995dabcc", "sha256"),
+            "x86_64": ("8b3a138e60aaeb172368701637c8b6f7ec39c0cb16978e69caeaff6bc4cfdf1b" "sha256")
+        }
     }
 
     def __init__(self, release, architecture):
@@ -213,9 +235,12 @@ class CentOS(LinuxDistro):
         self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
         download_file(self.RESOURCE_URL % (self.release, self.architecture,
                       self.release, self.architecture),
-                      "%s/netinstall.iso" % self.tftp_root)
+                      "%s/netinstall.iso" % self.tftp_root,
+                      checksum=checksum,
+                      checksum_type=checksum_type)
 
     def unpack(self):
         iso = "%s/netinstall.iso" % self.tftp_root
@@ -276,10 +301,20 @@ class Debian(LinuxDistro):
                    "installer-%s/current/images/netboot/netboot.tar.gz"
 
     RELEASES = {
-        "squeeze": set(["amd64", "i386", "ia64", "kfreebsd-amd64",
-                        "kfreebsd-i386"]),
-        "wheezy": set(["amd64", "i386", "ia64", "kfreebsd-amd64",
-                       "kfreebsd-i386"])
+        "squeeze": {
+            "amd64": ("ce7278b49b58c3ad48bbe4f4fa921358", "md5"),
+            "i386": ("6f32b5b6460eebc81e890bff5127349e", "md5"),
+            "ia64": ("cf90be1e05186b3a22808d75e22b2a20", "md5"),
+            "kfreebsd-amd64": ("ff05099c9c4ffaa3d8ab234dfb71880e", "md5"),
+            "kfreebsd-i386": ("de81fae4e2b818dcaef7870fdf58810c", "md5")
+        },
+        "wheezy": {
+            "amd64": ("f8877de311141263890e751336ab82cf", "md5"),
+            "i386": ("99a91a8a9805e82b8713f7355cfbf34f", "md5"),
+            "ia64": ("fccf1a31ee08f7e6609ffeb8d91910f2", "md5"),
+            "kfreebsd-amd64": ("dc477cc9b3beebd6450e2264ee67580f", "md5"),
+            "kfreebsd-i386": ("0bd1d1046b428190d2cced5ddcf63106", "md5")
+        }
     }
 
     def __init__(self, release, architecture):
@@ -307,8 +342,10 @@ class Debian(LinuxDistro):
         self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
         download_file(self.RESOURCE_URL % (self.release, self.architecture),
-                      "%s/netboot.tar.gz" % self.tftp_root)
+                      "%s/netboot.tar.gz" % self.tftp_root, checksum=checksum,
+                      checksum_type=checksum_type)
 
     def unpack(self):
         # Unpack the downloaded tar file
@@ -332,13 +369,34 @@ class Ubuntu(Debian):
                    "installer-%s/current/images/netboot/netboot.tar.gz"
 
     RELEASES = {
-        "hardy": set(["amd64", "i386"]),
-        "lucid": set(["amd64", "i386"]),
-        "oneiric": set(["amd64", "i386"]),
-        "precise": set(["amd64", "i386"]),
-        "quantal": set(["amd64", "i386"]),
-        "raring": set(["amd64", "i386"]),
-        "saucy": set(["amd64", "i386"])
+        "hardy": {
+            "amd64": ("cc8b4c83efc5ff91d5de7a6eb122e71c", "md5"),
+            "i386": ("9cd31b43ee622759f1d0afd8f0292d2c", "md5")
+        },
+        "lucid": {
+            "amd64": ("0bfd61ea320aff52a453dc9855516e98342930c5bddb87d2265174c2d040c2c0", "sha256"),
+            "i386": ("820b9f1a049c43b0511f830e7b1db1ec6a0e73e1617288bdd6aabac39a797557", "sha256")
+        },
+        "oneiric": {
+            "amd64": ("91710c8f0e66d1d9b700d28499872d7a60a22ebaea6e3705d678daa13b066266", "sha256"),
+            "i386": ("433b32988cdde07fdf1477791be65669ebd1359eede40809555c767bdd1aa421", "sha256")
+        },
+        "precise": {
+            "amd64": ("ac7f4fed04baa620ec9a6f746615cc62691bb6c6a2ffa0404d957e9ad64a8956", "sha256"),
+            "i386": ("7ecda678385471238bed28b47113d8053b88b54b48b3df05f286f7cb7c20f0bd", "sha256")
+        },
+        "quantal": {
+            "amd64": ("5975d5ba3147b106631cb3106a7e933b87772eb311dd8b3f430f1f058a5df773", "sha256"),
+            "i386": ("517bbf6c3ff4fa5ad2b8fcc9c02243353543059e966abbab546a16ccf693fc6b", "sha256")
+        },
+        "raring": {
+            "amd64": ("05265419c9fd12c9bbe4c5efa834df02f3bf72381a2c9443ed2706a705081b38", "sha256"),
+            "i386": ("cdfed46d5f8f5cc96166b92a64248da620f8d07e80ca6141db7ebcdbae3fb899", "sha256")
+        },
+        "saucy": {
+            "amd64": ("d310cc8d1fc20b90ed48aa16ad9d40eea6c41f2774389a3a6db78038e4072c65", "sha256"),
+            "i386": ("dccb4aed6e38d003567466805f6c1cfa29437326bcb9c9366e8f6fe141e0f0f1", "sha256")
+        }
     }
 
     def __init__(self, *args):
@@ -455,8 +513,10 @@ if __name__ == '__main__':
             d.add_argument("release", choices=dc.RELEASES.keys(),
                            help="Distribution version")
             # Architecture
+
             d.add_argument("architecture",
-                           choices=set.union(*(dc.RELEASES.values())))
+                           choices=set.union(*[set(dc.RELEASES[z].keys())
+                                               for z in dc.RELEASES]))
             d.set_defaults(distro=x)
 
     ###########################################################################

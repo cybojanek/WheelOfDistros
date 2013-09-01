@@ -344,6 +344,68 @@ label linux
             output.write(kernel_string)
 
 
+class LiveCD(RelArchDistro):
+    """docstring for LiveCD"""
+
+    RESOURCE_URL = ""
+
+    def __init__(self, tftp_prefix, release, architecture, kernel, initrd,
+                 k_opts=None, i_opts=None):
+        super(LiveCD, self).__init__(tftp_prefix, release, architecture)
+        self.kernel = kernel
+        self.initrd = initrd
+        self.k_opts = k_opts if k_opts is not None else ""
+        self.i_opts = i_opts if i_opts is not None else ""
+        self.nfs_root = "%s/iso" % (self.tftp_root)
+
+
+    def fetch(self):
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
+        download_file(self.RESOURCE_URL % (self.release, self.architecture),
+                      "%s/livecd.iso" % self.tftp_root, checksum=checksum,
+                      checksum_type=checksum_type)
+
+    def unpack(self):
+        # Extract iso
+        extract_iso("%s/livecd.iso" % self.tftp_root, self.nfs_root)
+
+        # Copy kernel
+        for f in [self.kernel, self.initrd]:
+            base = os.path.basename(f)
+            print "%s %s" % (colorize("Copying:", "blue"), base)
+            shutil.copy("%s/%s" % (self.nfs_root, f),
+                        "%s/%s" % (self.tftp_root, base))
+
+        # Copy syslinux files
+        files_to_copy = ["pxelinux.0"]
+        if self.architecture == "i386":
+            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
+        else:
+            files_to_copy += ["ldlinux.e64"]
+        for f in files_to_copy:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("syslinux/%s" % f, self.tftp_root)
+
+        # Write out the menu
+        directory = "%s/pxelinux.cfg" % self.tftp_root
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        kernel_string = """
+default linux
+label linux
+    kernel %s %s nfsroot=10.1.0.1:%s
+    append initrd=%s %s
+                """ % (os.path.basename(self.kernel), self.k_opts,
+                       self.nfs_root, os.path.basename(self.initrd),
+                       self.i_opts)
+
+        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
+                         colorize(kernel_string, "white"))
+        with open('%s/default' % directory, 'w') as output:
+            output.write(kernel_string)
+
+
 class ArchLinux(LinuxDistro):
     """docstring for ArchLinux"""
     def __init__(self):
@@ -548,24 +610,15 @@ class Ubuntu(Debian):
         self.tftp_root = self.tftp_root.replace("debian", "ubuntu")
 
 
-class UbuntuLive(RelArchDistro):
+class UbuntuLive(LiveCD):
     """docstring for UbuntuLive"""
 
-    RESOURCE_URL = "http://releases.ubuntu.com/%s/ubuntu-%s-%s-%s.iso"
+    RESOURCE_URL = "http://releases.ubuntu.com/%s/ubuntu-%s-desktop-%s.iso"
 
-    RELEASE_TO_INT = {"hardy": "8.04.4", "lucid": "10.04.4",
-                      "oneiric": "11.10", "precise": "12.04",
+    RELEASE_TO_INT = {"oneiric": "11.10", "precise": "12.04",
                       "quantal": "12.10", "raring": "13.04"}
 
     RELEASES = {
-        "hardy": {
-            "amd64": ("95f8e95ad745a2cf0ad956674113897a479f34f9ef3c63d4fb3a525144f32f29", "sha256"),
-            "i386": ("dfc9a0a85751b1b54cc7b0ae838668e561ea83ad9f98b146d253f566d7d56a38", "sha256")
-        },
-        "lucid": {
-            "amd64": ("837a6ec168913951bf6371a6df6837217790f4210045c9f991eab641533726fe", "sha256"),
-            "i386": ("4c4c982beede1094bcb20f93ccd8f79f63dec35b17d3e4b877d620f9faa47c38", "sha256")
-        },
         "oneiric": {
             "amd64": ("462a1311378437b64dc507de7da6cab88528939dccee91940f94ce3e57c1cfab", "sha256"),
             "i386": ("31d5254e83457dfe7b46e6c2553b27b41e6e942122edb2b2ff5c3e9a82ad3256", "sha256")
@@ -584,69 +637,19 @@ class UbuntuLive(RelArchDistro):
         }
     }
 
-    def __init__(self, release, architecture, version):
-        super(UbuntuLive, self).__init__(release, architecture)
-        if version not in ("desktop", "server"):
-            raise Exception("Unsupported Ubuntu Live version: %s" % version)
-        self.version = version
-        self.dhcp_boot = "pxelinux.0"
-        self.tftp_root = "%s/root/ubuntu_live/%s/%s/%s" % (os.getcwd(),
-                                                           self.release,
-                                                           self.version,
-                                                           self.architecture)
-        self.net_ubuntu = self.tftp_root
-        self.nfs_root = "%s/nfsroot" % (self.tftp_root)
+    def __init__(self, release, architecture):
+        super(UbuntuLive, self).__init__(
+            "ubuntu_live", release, architecture, "casper/vmlinuz",
+            "casper/initrd.lz", k_opts="boot=casper netboot=nfs")
 
     def fetch(self):
+        # Subclass because of ints in urls
         checksum, checksum_type = self.RELEASES[self.release][self.architecture]
         download_file(self.RESOURCE_URL % (self.release,
                                            self.RELEASE_TO_INT[self.release],
-                                           self.version,
                                            self.architecture),
-                      "%s/ubuntu.iso" % self.tftp_root, checksum=checksum,
+                      "%s/livecd.iso" % self.tftp_root, checksum=checksum,
                       checksum_type=checksum_type)
-
-    def unpack(self):
-        # Extract iso
-        extract_iso("%s/ubuntu.iso" % self.tftp_root, self.nfs_root)
-
-        # Copy kernel
-        for f in ["vmlinuz", "initrd.lz"]:
-            print "%s %s" % (colorize("Copying:", "blue"), f)
-            shutil.copy("%s/casper/%s" % (self.nfs_root, f), self.tftp_root)
-
-        # Copy syslinux files
-        files_to_copy = ["pxelinux.0"]
-        if self.architecture == "i386":
-            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
-        else:
-            files_to_copy += ["ldlinux.e64"]
-        for f in files_to_copy:
-            print "%s %s" % (colorize("Copying:", "blue"), f)
-            shutil.copy("syslinux/%s" % f, self.tftp_root)
-
-        # Write out the menu
-        directory = "%s/pxelinux.cfg" % self.tftp_root
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        kernel_string = """
-default linux
-label linux
-    kernel vmlinuz boot=casper netboot=nfs nfsroot=10.1.0.1:%s
-    append initrd=initrd.lz
-                """ % self.nfs_root
-
-        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
-                         colorize(kernel_string, "white"))
-        with open('%s/default' % directory, 'w') as output:
-            output.write(kernel_string)
-
-    def start(self):
-        pass
-
-    def stop(self):
-        pass
 
 
 class DNSMasq(object):
@@ -734,15 +737,14 @@ class NFS(object):
         self.export_ip = export_ip
         self.netmask = netmask
         if sys.platform == 'darwin':
-            self.export_string = "%s -maproot=root:wheel -network %s -mask %s  # WheelOfDistros" % (self.path, self.export_ip, self.netmask)
+            self.export_string = "%s -maproot=root:wheel -network %s -mask %s" % (self.path, self.export_ip, self.netmask)
         elif sys.platform.startswith('linux'):
-            self.export_string = "%s %s/%s (rw,sync,no_subtree_check)  # WheelOfDistros" % (self.path, self.export_ip, self.netmask)
+            self.export_string = "%s %s/%s (rw,sync,no_subtree_check)" % (self.path, self.export_ip, self.netmask)
 
     def start(self):
         with open("/etc/exports", "a") as exports:
             exports.write("%s\n" % self.export_string)
         if sys.platform == 'darwin':
-            # subprocess.call(["nfsd", "enable"])
             subprocess.call(["nfsd", "restart"])
         elif sys.platform.startswith('linux'):
             # shit...now we have to guess what distro we're on
@@ -753,19 +755,18 @@ class NFS(object):
         # WARNING: not the safest thing to do... :/
         # Get all the lines, and remove ours
         lines = open("/etc/exports", "r").readlines()
-        lines = filter(lambda x: not x.endswith("# WheelOfDistros\n"), lines)
+        lines = filter(lambda x: "WheelOfDistros" not in x, lines)
         # Now write back everything else
         with open("/etc/exports", "w") as exports:
             for line in lines:
                 exports.write(line)
         if sys.platform == 'darwin':
-            # subprocess.call(["nfsd", "enable"])
             subprocess.call(["nfsd", "stop"])
 
 
 DistroMapping = {"archlinux": ArchLinux, "centos": CentOS,
                  "opensuse": OpenSUSE, "debian": Debian, "fedora": Fedora,
-                 "ubuntu": Ubuntu, "ubuntulive": UbuntuLive}
+                 "ubuntu": Ubuntu, "ubuntu_live": UbuntuLive}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
@@ -794,7 +795,7 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "fedora", "opensuse", "ubuntu", "ubuntulive"):
+        for x in ("centos", "debian", "fedora", "opensuse", "ubuntu", "ubuntu_live"):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
@@ -804,10 +805,6 @@ if __name__ == '__main__':
             d.add_argument("architecture",
                            choices=set.union(*[set(dc.RELEASES[z].keys())
                                                for z in dc.RELEASES]))
-            if x == "ubuntulive":
-                d.add_argument("--version", required=False,
-                               choices=["desktop", "server"],
-                               default="desktop")
             d.set_defaults(distro=x)
 
     ###########################################################################
@@ -826,11 +823,8 @@ if __name__ == '__main__':
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    elif args.distro in ('centos', 'debian', 'fedora', 'opensuse', 'ubuntu'):
+    elif args.distro in ('centos', 'debian', 'fedora', 'opensuse', 'ubuntu', 'ubuntu_live'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
-    elif args.distro in ('ubuntulive'):
-        linux = DistroMapping[args.distro](args.release, args.architecture,
-                                           args.version)
 
     if args.command == "download":
         linux.fetch()
@@ -844,7 +838,7 @@ if __name__ == '__main__':
                           "10.1.0.100,10.1.0.200,12h",
                           interface=args.interface)
         dnsmasq.start()
-        if args.distro in ("ubuntulive"):
+        if args.distro == "ubuntu_live":
             nfs = NFS(linux.nfs_root, "10.1.0.0", "255.255.255.0")
             nfs.start()
     elif args.command == "stop":

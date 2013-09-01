@@ -10,6 +10,28 @@ import time
 import urllib2
 
 
+def colorize(string, color):
+    """Use ANSI escape codes to colorize a string
+
+    Arguments:
+    string - string to colorize
+    color - one of colorize.colors
+
+    """
+    colors = {
+        'red': '\033[91m',
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'blue': '\033[94m',
+        'purple': '\033[95m',
+        'white': '\033[97m',
+
+    }
+    if not sys.stdout.isatty():
+        return string
+    return '%s%s%s' % (colors[color], string, '\033[0m')
+
+
 def pretty_bytes(bytes, precision=2):
     """Nicely format an amount of bytes to use units
 
@@ -50,7 +72,7 @@ def checksum_file(f, checksum_type="sha256"):
     if checksum_type not in hashes:
         raise Exception("Unsupported hash type: %s" % checksum_type)
 
-    print "Validating checksum of: %s" % f
+    print "%s %s" % (colorize("Checksuming:", "blue"), f)
     file_name = os.path.basename(f)
     size = os.path.getsize(f)
     h = hashes[checksum_type]()
@@ -102,19 +124,21 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
         downloaded, last_read, rate, time_left = 0, 0, 0.0, 0
         block_size = 65536
         start = time.time()
-        print "Downloading: %s from: %s" % (pretty_bytes(size), url)
-        print "Saving to: %s" % output
+        print "%s %s from: %s to %s" % (
+            colorize("Downloading:", "blue"),
+            colorize(pretty_bytes(size), "green"), url, output)
         if os.path.isfile(output) and os.path.getsize(output) == size:
+            print colorize("File size matches. Skipping download.", "yellow")
             if checksum is None:
-                print "File size matches. Skipping download."
                 return
             else:
-                print "File size matches. Skipping download."
                 cf = checksum_file(output, checksum_type=checksum_type)
                 if cf != checksum:
-                    print "Checksum doesn't match redownloading..."
+                    print colorize("Checksum doesn't match redownloading...",
+                                   "yellow")
                 else:
-                    print "Checksum validates. Skipping download."
+                    print colorize("Checksum validates. Skipping download.",
+                                   "yellow")
                     return
         destination = open(output, "wb")
         while True:
@@ -138,8 +162,9 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
         destination.close()
         cf = checksum_file(output, checksum_type=checksum_type)
         if checksum and cf != checksum:
-            raise Exception("Checksum didn't validate: %s != %s"
-                            "" % (checksum, cf))
+            print colorize("Checksum didn't validate: %s != %s"
+                           "" % (checksum, cf), "red")
+            sys.exit(1)
 
 
 class LinuxDistro(object):
@@ -244,7 +269,6 @@ class CentOS(LinuxDistro):
 
     def unpack(self):
         iso = "%s/netinstall.iso" % self.tftp_root
-        print "Extracting pxeboot from: %s" % iso
         if sys.platform == "darwin":
             directory = "%s/iso" % self.tftp_root
             if not os.path.exists(directory):
@@ -265,7 +289,7 @@ class CentOS(LinuxDistro):
                 subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
                                 "/images/pxeboot/initrd.img"], stdout=output)
         # Copy syslinux files
-        print "Copying pxelinux.0"
+        print colorize("Copying pxelinux.0", "blue")
         shutil.copy("syslinux/pxelinux.0", self.tftp_root)
 
         # Write out the menu
@@ -275,13 +299,13 @@ class CentOS(LinuxDistro):
 
         kernel_string = """
 default linux
-
 label linux
     kernel vmlinuz method=http://mirror.centos.org/centos/6/os/%s/
     append initrd=initrd.img devfs=nomount
                 """ % self.architecture
 
-        print "Writing default kernel boot: %s" % kernel_string
+        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
+                         colorize(kernel_string, "white"))
         with open('%s/default' % directory, 'w') as output:
             output.write(kernel_string)
 
@@ -349,7 +373,8 @@ class Debian(LinuxDistro):
 
     def unpack(self):
         # Unpack the downloaded tar file
-        print "Unpacking: %s/netboot.tar.gz" % self.tftp_root
+        print "%s %s/netboot.tar.gz" % (colorize("Unpacking:", "blue"),
+                                        self.tftp_root)
         t = tarfile.open('%s/netboot.tar.gz' % self.tftp_root)
         t.extractall(self.tftp_root)
 
@@ -415,7 +440,7 @@ class DNSMasq(object):
         self.interface = interface
 
     def start(self):
-        print "Running dnsmasq..."
+        print colorize("Running dnsmasq...", "blue")
         args = ["dnsmasq",
                 "--pid-file=%s/dnsmasq.pid" % os.getcwd(),
                 "--log-facility=%s/dnsmasq.log" % os.getcwd(),
@@ -430,7 +455,7 @@ class DNSMasq(object):
 
     @staticmethod
     def stop():
-        print "Stopping dnsmasq..."
+        print colorize("Stopping dnsmasq...", "blue")
         pid = open('%s/dnsmasq.pid' % os.getcwd()).read().rstrip()
         subprocess.call(["kill", pid])
 
@@ -529,7 +554,8 @@ if __name__ == '__main__':
 
     # Check for root
     if args.command in ("serve", "stop") and os.getuid() != 0:
-        print "Need root priveleges to serve/stop"
+        sys.stderr.write(colorize("Need root priveleges to serve/stop\n",
+                                  "red"))
         sys.exit(1)
 
     if args.distro == 'archlinux':

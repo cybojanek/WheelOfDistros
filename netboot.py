@@ -374,25 +374,14 @@ class CentOS(RelArchDistro):
 
     def unpack(self):
         iso = "%s/netinstall.iso" % self.tftp_root
-        if sys.platform == "darwin":
-            directory = "%s/iso" % self.tftp_root
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-            subprocess.call(["hdiutil", "attach", iso, "-mountpoint",
-                            directory], stdout=subprocess.PIPE)
-            shutil.copy("%s/images/pxeboot/vmlinuz" % directory,
-                        self.tftp_root)
-            shutil.copy("%s/images/pxeboot/initrd.img" % directory,
-                        self.tftp_root)
-            subprocess.call(["hdiutil", "detach", directory],
-                            stdout=subprocess.PIPE)
-        elif sys.platform == "linux":
-            with open("%s/vmlinuz" % self.tftp_root, "wb") as output:
-                subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
-                                "/images/pxeboot/vmlinuz"], stdout=output)
-            with open("%s/initrd.img" % self.tftp_root, "wb") as output:
-                subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
-                                "/images/pxeboot/initrd.img"], stdout=output)
+        files_to_copy = [("/images/pxeboot/vmlinuz", "vmlinuz"),
+                         ("/images/pxeboot/initrd.img", "initrd.img")]
+        for f in files_to_copy:
+            src, dst = f
+            print "%s %s" % (colorize("Extracting:", "blue"), dst)
+            with open("%s/%s" % (self.tftp_root, dst), "wb") as output:
+                subprocess.call(["isoinfo", "-J", "-i", iso, "-x", src],
+                                stdout=output)
         # Copy syslinux files
         files_to_copy = ["pxelinux.0"]
         if self.architecture == "i386":

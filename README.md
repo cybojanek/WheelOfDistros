@@ -8,7 +8,7 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 
 * python
 
-* isoinfo (CentOS on Linux)
+* isoinfo (cdrtools package) (Centos)
 
 # Supported Distros
 

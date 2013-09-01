@@ -287,88 +287,6 @@ class RelArchDistro(LinuxDistro):
                 self.architecture, self.release))
 
 
-class OpenSUSE(RelArchDistro):
-    """docstring for OpenSUSE"""
-
-    RESOURCE_URL = "http://download.opensuse.org/distribution/%s/repo/oss" \
-                   "/boot/%s/loader/%s"
-
-    RELEASES = {
-        "11.4": {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        },
-        "12.1": {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        },
-        "12.2": {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        },
-        "12.3": {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        },
-        "openSUSE-current" : {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        },
-        "openSUSE-stable" : {
-            "i386": (None, None),
-            "x86_64": (None, None)
-        }
-    }
-
-    def __init__(self, release, architecture):
-        super(OpenSUSE, self).__init__(release, architecture)
-        self.tftp_root = "%s/root/opensuse/%s/%s" % (os.getcwd(), self.release,
-                                                     self.architecture)
-        self.dhcp_boot = "pxelinux.0"
-
-    def fetch(self):
-        download_file(self.RESOURCE_URL % (self.release, self.architecture,
-                      "linux"), "%s/linux" % self.tftp_root)
-        download_file(self.RESOURCE_URL % (self.release, self.architecture,
-                      "initrd"), "%s/initrd" % self.tftp_root)
-
-    def unpack(self):
-         # Copy syslinux files
-        files_to_copy = ["pxelinux.0"]
-        if self.architecture == "i386":
-            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
-        else:
-            files_to_copy += ["ldlinux.e64"]
-        for f in files_to_copy:
-            print "%s %s" % (colorize("Copying:", "blue"), f)
-            shutil.copy("syslinux/%s" % f, self.tftp_root)
-
-        # Write out the menu
-        directory = "%s/pxelinux.cfg" % self.tftp_root
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        kernel_string = """
-default linux
-label linux
-    kernel linux install=http://download.opensuse.org/distribution/%s/repo/oss/
-    append initrd=initrd
-                """ % self.release
-
-        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
-                         colorize(kernel_string, "white"))
-        with open('%s/default' % directory, 'w') as output:
-            output.write(kernel_string)
-
-    def start(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
-
-    def stop(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
-
-
 class CentOS(RelArchDistro):
     """docstring for CentOS"""
 
@@ -493,6 +411,88 @@ class Debian(RelArchDistro):
                                         self.tftp_root)
         t = tarfile.open('%s/netboot.tar.gz' % self.tftp_root)
         t.extractall(self.tftp_root)
+
+    def start(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+    def stop(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+
+class OpenSUSE(RelArchDistro):
+    """docstring for OpenSUSE"""
+
+    RESOURCE_URL = "http://download.opensuse.org/distribution/%s/repo/oss" \
+                   "/boot/%s/loader/%s"
+
+    RELEASES = {
+        "11.4": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.1": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.2": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.3": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "openSUSE-current" : {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "openSUSE-stable" : {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        }
+    }
+
+    def __init__(self, release, architecture):
+        super(OpenSUSE, self).__init__(release, architecture)
+        self.tftp_root = "%s/root/opensuse/%s/%s" % (os.getcwd(), self.release,
+                                                     self.architecture)
+        self.dhcp_boot = "pxelinux.0"
+
+    def fetch(self):
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      "linux"), "%s/linux" % self.tftp_root)
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      "initrd"), "%s/initrd" % self.tftp_root)
+
+    def unpack(self):
+         # Copy syslinux files
+        files_to_copy = ["pxelinux.0"]
+        if self.architecture == "i386":
+            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
+        else:
+            files_to_copy += ["ldlinux.e64"]
+        for f in files_to_copy:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("syslinux/%s" % f, self.tftp_root)
+
+        # Write out the menu
+        directory = "%s/pxelinux.cfg" % self.tftp_root
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        kernel_string = """
+default linux
+label linux
+    kernel linux install=http://download.opensuse.org/distribution/%s/repo/oss/
+    append initrd=initrd
+                """ % self.release
+
+        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
+                         colorize(kernel_string, "white"))
+        with open('%s/default' % directory, 'w') as output:
+            output.write(kernel_string)
 
     def start(self):
         # Nothing to do here - we just need dnsmasq

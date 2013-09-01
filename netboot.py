@@ -344,20 +344,21 @@ label linux
             output.write(kernel_string)
 
 
-class LiveCD(RelArchDistro):
+class LiveCD(KernelInitrdDistro):
     """docstring for LiveCD"""
 
     RESOURCE_URL = ""
 
     def __init__(self, tftp_prefix, release, architecture, kernel, initrd,
                  k_opts=None, i_opts=None):
-        super(LiveCD, self).__init__(tftp_prefix, release, architecture)
-        self.kernel = kernel
-        self.initrd = initrd
-        self.k_opts = k_opts if k_opts is not None else ""
-        self.i_opts = i_opts if i_opts is not None else ""
+        super(LiveCD, self).__init__(tftp_prefix, release, architecture,
+                                     os.path.basename(kernel),
+                                     os.path.basename(initrd), k_opts, i_opts)
+        self.live_kernel = kernel
+        self.live_initrd = initrd
         self.nfs_root = "%s/iso" % (self.tftp_root)
-
+        # Extend kernel opts with nfsroot
+        self.k_opts = "%s nfsroot=10.1.0.1:%s" % (self.k_opts, self.nfs_root)
 
     def fetch(self):
         checksum, checksum_type = self.RELEASES[self.release][self.architecture]
@@ -366,44 +367,17 @@ class LiveCD(RelArchDistro):
                       checksum_type=checksum_type)
 
     def unpack(self):
+        super(LiveCD, self).unpack()
+
         # Extract iso
         extract_iso("%s/livecd.iso" % self.tftp_root, self.nfs_root)
 
         # Copy kernel
-        for f in [self.kernel, self.initrd]:
+        for f in [self.live_kernel, self.live_initrd]:
             base = os.path.basename(f)
             print "%s %s" % (colorize("Copying:", "blue"), base)
             shutil.copy("%s/%s" % (self.nfs_root, f),
                         "%s/%s" % (self.tftp_root, base))
-
-        # Copy syslinux files
-        files_to_copy = ["pxelinux.0"]
-        if self.architecture == "i386":
-            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
-        else:
-            files_to_copy += ["ldlinux.e64"]
-        for f in files_to_copy:
-            print "%s %s" % (colorize("Copying:", "blue"), f)
-            shutil.copy("syslinux/%s" % f, self.tftp_root)
-
-        # Write out the menu
-        directory = "%s/pxelinux.cfg" % self.tftp_root
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        kernel_string = """
-default linux
-label linux
-    kernel %s %s nfsroot=10.1.0.1:%s
-    append initrd=%s %s
-                """ % (os.path.basename(self.kernel), self.k_opts,
-                       self.nfs_root, os.path.basename(self.initrd),
-                       self.i_opts)
-
-        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
-                         colorize(kernel_string, "white"))
-        with open('%s/default' % directory, 'w') as output:
-            output.write(kernel_string)
 
 
 class ArchLinux(LinuxDistro):
@@ -525,6 +499,41 @@ class Fedora(KernelInitrdDistro):
             k_opts="inst.repo=http://download.fedoraproject.org/pub/fedora"
                     "/linux/releases/%s/Fedora/%s/os/" % (release,
                                                           architecture))
+
+
+class LinuxMint(LiveCD):
+    """docstring for LinuxMint"""
+
+    RESOURCE_URL = "http://mirror.jmu.edu/pub/linuxmint/images/stable/%s" \
+                   "/linuxmint-%s-cinnamon-dvd-%s.iso"
+
+    RELEASES = {
+        "13": {
+            "32bit": ("48d8387d3d7e769c029f65c95b1f9fba4e837bfc352828db5d77dd87e13660a5", "sha256"),
+            "64bit": ("609bd4dbe89b501fdb13ddc51bd919ebc2b9e14c9895569e1d0cdc225c44cbc8", "sha256")
+        },
+        "14": {
+            "32bit": ("7e5657c9deb46de8490bcd2b9ce8100ecc0dbf7ec95507c2c069d311d5994c96", "sha256"),
+            "64bit": ("c73347d753e77904888e9574adffe7d029b31791e238f123557cceccd158fc7c", "sha256"),
+        },
+        "15": {
+            "32bit": ("db744ba03c7352edab9519c9ae4025c03df8b4915b5616119f68ab33eeb8ab66", "sha256"),
+            "64bit": ("d9ab000786a9911076aeb3cf6ac89d3ebaf5cb9ab0aa6f50d72430897e21abef", "sha256")
+        }
+    }
+
+    def __init__(self, release, architecture):
+        super(LinuxMint, self).__init__(
+            "mint_live", release, architecture, "casper/vmlinuz",
+            "casper/initrd.lz", k_opts="boot=casper netboot=nfs")
+
+    def fetch(self):
+        # Subclass because of iso name
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
+        download_file(self.RESOURCE_URL % (self.release, self.release,
+                                           self.architecture),
+                      "%s/livecd.iso" % self.tftp_root, checksum=checksum,
+                      checksum_type=checksum_type)
 
 
 class OpenSUSE(KernelInitrdDistro):
@@ -764,8 +773,9 @@ class NFS(object):
             subprocess.call(["nfsd", "stop"])
 
 
-DistroMapping = {"archlinux": ArchLinux, "centos": CentOS,
-                 "opensuse": OpenSUSE, "debian": Debian, "fedora": Fedora,
+DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
+                 "fedora": Fedora, "mint_live": LinuxMint,
+                 "opensuse": OpenSUSE,
                  "ubuntu": Ubuntu, "ubuntu_live": UbuntuLive}
 
 if __name__ == '__main__':
@@ -795,7 +805,7 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "fedora", "opensuse", "ubuntu", "ubuntu_live"):
+        for x in ("centos", "debian", "fedora", "mint_live", "opensuse", "ubuntu", "ubuntu_live"):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
@@ -823,7 +833,7 @@ if __name__ == '__main__':
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    elif args.distro in ('centos', 'debian', 'fedora', 'opensuse', 'ubuntu', 'ubuntu_live'):
+    elif args.distro in ('centos', 'debian', 'fedora', 'mint_live', 'opensuse', 'ubuntu', 'ubuntu_live'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
 
     if args.command == "download":
@@ -838,7 +848,7 @@ if __name__ == '__main__':
                           "10.1.0.100,10.1.0.200,12h",
                           interface=args.interface)
         dnsmasq.start()
-        if args.distro == "ubuntu_live":
+        if args.distro in ("mint_live", "ubuntu_live"):
             nfs = NFS(linux.nfs_root, "10.1.0.0", "255.255.255.0")
             nfs.start()
     elif args.command == "stop":

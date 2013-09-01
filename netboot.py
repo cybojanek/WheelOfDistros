@@ -116,10 +116,10 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
         directory = os.path.dirname(output)
         if not os.path.exists(directory):
             os.makedirs(directory)
-        # TODO: check if file exists and checksum - if ok, then don't download
         # Download
         file_name = url.split('/')[-1]
-        u = urllib2.urlopen(url)
+        req = urllib2.Request(url)
+        u = urllib2.urlopen(req)
         size = int(u.info().getheaders("Content-Length")[0])
         downloaded, last_read, rate, time_left = 0, 0, 0.0, 0
         block_size = 65536
@@ -137,10 +137,18 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                     print colorize("Checksum doesn't match redownloading...",
                                    "yellow")
                 else:
-                    print colorize("Checksum validates. Skipping download.",
+                    print colorize("Checksum validates. Skipping re-download.",
                                    "yellow")
                     return
-        destination = open(output, "wb")
+        elif os.path.isfile(output) and os.path.getsize(output) < size:
+            print colorize("Trying to continue partial download...", "yellow")
+            downloaded = os.path.getsize(output)
+            last_read = downloaded
+            req.headers["Range"] = "bytes=%s-%s" % (downloaded, size - 1)
+            u = urllib2.urlopen(req)
+            destination = open(output, "ab")
+        else:
+            destination = open(output, "wb")
         while True:
             buf = u.read(block_size)
             if not buf:

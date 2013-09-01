@@ -76,7 +76,7 @@ def checksum_file(f, checksum_type="sha256"):
     file_name = os.path.basename(f)
     size = os.path.getsize(f)
     h = hashes[checksum_type]()
-    block_size = 65536
+    block_size = 262144
     input_file = open(f, "rb")
     checked, last_read, rate, time_left = 0, 0, 0.0, 0
     start = time.time()
@@ -122,7 +122,7 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
         u = urllib2.urlopen(req)
         size = int(u.info().getheaders("Content-Length")[0])
         downloaded, last_read, rate, time_left = 0, 0, 0.0, 0
-        block_size = 65536
+        block_size = 262144
         start = time.time()
         print "%s %s from: %s to %s" % (
             colorize("Downloading:", "blue"),
@@ -174,6 +174,33 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                 print colorize("Checksum didn't validate: %s != %s"
                                "" % (checksum, cf), "red")
                 sys.exit(1)
+
+
+def extract_iso(iso, destination, source=None):
+    print "%s %s" % (colorize("Extracting:", "blue"), iso)
+    if not os.path.exists(destination):
+            os.makedirs(destination)
+    # Get a list of all the directories
+    p = subprocess.Popen(["isoinfo", "-R", "-l", "-i", iso],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = p.communicate()
+    last_dir = "/"
+    for line in out.split('\n'):
+        line = line.rstrip().lstrip()
+        if line.startswith("Directory listing of "):
+            # Create a new directory
+            last_dir = line[len("Directory listing of "):]
+            directory = "%s/%s" % (destination, last_dir)
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+        elif line.startswith('d'):
+            # Its a nested directory - itll be taken care of later
+            pass
+        elif len(line) > 0:
+            f = "%s%s" % (last_dir, line[line.find("]") + 2:])
+            with open("%s/%s" % (destination, f), "w") as output:
+                subprocess.call(["isoinfo", "-J", "-i", iso, "-x", f],
+                                stdout=output)
 
 
 class LinuxDistro(object):
@@ -376,8 +403,7 @@ class CentOS(RelArchDistro):
         iso = "%s/netinstall.iso" % self.tftp_root
         files_to_copy = [("/images/pxeboot/vmlinuz", "vmlinuz"),
                          ("/images/pxeboot/initrd.img", "initrd.img")]
-        for f in files_to_copy:
-            src, dst = f
+        for src, dst in files_to_copy:
             print "%s %s" % (colorize("Extracting:", "blue"), dst)
             with open("%s/%s" % (self.tftp_root, dst), "wb") as output:
                 subprocess.call(["isoinfo", "-J", "-i", iso, "-x", src],
@@ -520,6 +546,107 @@ class Ubuntu(Debian):
                                                    self.architecture)
 
 
+class UbuntuLive(RelArchDistro):
+    """docstring for UbuntuLive"""
+
+    RESOURCE_URL = "http://releases.ubuntu.com/%s/ubuntu-%s-%s-%s.iso"
+
+    RELEASE_TO_INT = {"hardy": "8.04.4", "lucid": "10.04.4",
+                      "oneiric": "11.10", "precise": "12.04",
+                      "quantal": "12.10", "raring": "13.04"}
+
+    RELEASES = {
+        "hardy": {
+            "amd64": ("95f8e95ad745a2cf0ad956674113897a479f34f9ef3c63d4fb3a525144f32f29", "sha256"),
+            "i386": ("dfc9a0a85751b1b54cc7b0ae838668e561ea83ad9f98b146d253f566d7d56a38", "sha256")
+        },
+        "lucid": {
+            "amd64": ("837a6ec168913951bf6371a6df6837217790f4210045c9f991eab641533726fe", "sha256"),
+            "i386": ("4c4c982beede1094bcb20f93ccd8f79f63dec35b17d3e4b877d620f9faa47c38", "sha256")
+        },
+        "oneiric": {
+            "amd64": ("462a1311378437b64dc507de7da6cab88528939dccee91940f94ce3e57c1cfab", "sha256"),
+            "i386": ("31d5254e83457dfe7b46e6c2553b27b41e6e942122edb2b2ff5c3e9a82ad3256", "sha256")
+        },
+        "precise": {
+            "amd64": ("54574f47b1aef0f9e156afd86aa97cf76df89a957f9b5ab43552a427499ba7cb", "sha256"),
+            "i386": ("8d5b84835082e6187504eead904f2672c2a9f3ef4ea5da9ddb6e2d6cf203d485", "sha256")
+        },
+        "quantal": {
+            "amd64": ("256a2cc652ec86ff366907fd7b878e577b631cc6c6533368c615913296069d80", "sha256"),
+            "i386": ("d91eee1b74fb81f4235fdaed21e7566bbe8965ec6b7206a122f2025365621ad6", "sha256")
+        },
+        "raring": {
+            "amd64": ("b4b20e0293c2305e83a60c605d39cabf43115794d574c68f1492d49fee0ab3d8", "sha256"),
+            "i386": ("fe4c4de422734dccc9d33d0e3990ef3440b7648d5c05acae372d5ffc80ca719d", "sha256")
+        }
+    }
+
+    def __init__(self, release, architecture, version):
+        super(UbuntuLive, self).__init__(release, architecture)
+        if version not in ("desktop", "server"):
+            raise Exception("Unsupported Ubuntu Live version: %s" % version)
+        self.version = version
+        self.dhcp_boot = "pxelinux.0"
+        self.tftp_root = "%s/root/ubuntu_live/%s/%s/%s" % (os.getcwd(),
+                                                           self.release,
+                                                           self.version,
+                                                           self.architecture)
+        self.net_ubuntu = self.tftp_root
+        self.nfs_root = "%s/nfsroot" % (self.tftp_root)
+
+    def fetch(self):
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
+        download_file(self.RESOURCE_URL % (self.release,
+                                           self.RELEASE_TO_INT[self.release],
+                                           self.version,
+                                           self.architecture),
+                      "%s/ubuntu.iso" % self.tftp_root, checksum=checksum,
+                      checksum_type=checksum_type)
+
+    def unpack(self):
+        # Extract iso
+        extract_iso("%s/ubuntu.iso" % self.tftp_root, self.nfs_root)
+
+        # Copy kernel
+        for f in ["vmlinuz", "initrd.lz"]:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("%s/casper/%s" % (self.nfs_root, f), self.tftp_root)
+
+        # Copy syslinux files
+        files_to_copy = ["pxelinux.0"]
+        if self.architecture == "i386":
+            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
+        else:
+            files_to_copy += ["ldlinux.e64"]
+        for f in files_to_copy:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("syslinux/%s" % f, self.tftp_root)
+
+        # Write out the menu
+        directory = "%s/pxelinux.cfg" % self.tftp_root
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        kernel_string = """
+default linux
+label linux
+    kernel vmlinuz boot=casper netboot=nfs nfsroot=10.1.0.1:%s
+    append initrd=initrd.lz
+                """ % self.nfs_root
+
+        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
+                         colorize(kernel_string, "white"))
+        with open('%s/default' % directory, 'w') as output:
+            output.write(kernel_string)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
 class DNSMasq(object):
     """docstring for DNSMasq"""
     def __init__(self, tftp_root, dhcp_boot, dhcp_range, interface=None):
@@ -552,31 +679,37 @@ class DNSMasq(object):
 
 class NAT(object):
     """docstring for NAT"""
-    def __init__(self, interface):
+    def __init__(self, external, internal):
         super(NAT, self).__init__()
-        self.interface = interface
+        self.external = external
+        self.internal = internal
 
     def start(self):
         if sys.platform == 'darwin':
             subprocess.call(["sysctl", "-w", "net.inet.ip.forwarding=1"])
-            p = subprocess.Popen(["ifconfig", self.interface],
+            p = subprocess.Popen(["ifconfig", self.external],
                                  stdout=subprocess.PIPE)
             out, err = p.communicate()
             if p.returncode != 0:
                 raise Exception("Failed to get ip for NAT device: %s"
-                                "" % self.interface)
+                                "" % self.external)
             ip = filter(lambda x: x.lstrip().rstrip().startswith('inet '),
                         out.split('\n'))[0].split()[1]
             subprocess.call(["/usr/sbin/natd", "-alias_address", ip,
-                             "-interface", self.interface, "-use_sockets",
+                             "-interface", self.external, "-use_sockets",
                              "-same_ports", "-unregistered_only", "-dynamic",
                              "-clamp_mss"])
             subprocess.call(["ipfw", "add", "divert", "natd", "ip", "from",
-                             "any", "to", "any", "via", self.interface])
-        elif sys.platform == 'linux':
+                             "any", "to", "any", "via", self.external])
+        elif sys.platform.startswith('linux'):
             subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=1"])
             subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING",
-                             "-o", self.interface, "-j", "MASQUERADE"])
+                             "-o", self.external, "-j", "MASQUERADE"])
+            subprocess.call(["iptables", "-A", "FORWARD", "-i", self.external,
+                             "-o", self.internal, "-m", "STATE",
+                             "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"])
+            subprocess.call(["iptables", "-A", "FORWARD", "-i", self.internal,
+                             "-o", self.external, "-j", "ACCEPT"])
 
     @staticmethod
     def stop():
@@ -584,15 +717,53 @@ class NAT(object):
             subprocess.call(["sysctl", "-w", "net.inet.ip.forwarding=0"])
             subprocess.call(["killall", "-9", "natd"])
             subprocess.call(["ipfw", "-f", "flush"])
-        elif sys.platform == 'linux':
+        elif sys.platform.startswith('linux'):
             subprocess.call(["sysctl", "-w", "net.ipv4.ip_forward=0"])
             # TODO: change this to remove
             # subprocess.call(["iptables", "-t", "nat", "-A", "POSTROUTING",
-                             # "-o", self.interface, "-j", "MASQUERADE"])
+                             # "-o", self.external, "-j", "MASQUERADE"])
+
+
+class NFS(object):
+    """docstring for NFS"""
+    def __init__(self, path, export_ip, netmask):
+        super(NFS, self).__init__()
+        self.path = path
+        self.export_ip = export_ip
+        self.netmask = netmask
+        if sys.platform == 'darwin':
+            self.export_string = "%s -maproot=root:wheel -network %s -mask %s  # WheelOfDistros" % (self.path, self.export_ip, self.netmask)
+        elif sys.platform.startswith('linux'):
+            self.export_string = "%s %s/%s (rw,sync,no_subtree_check)  # WheelOfDistros" % (self.path, self.export_ip, self.netmask)
+
+    def start(self):
+        with open("/etc/exports", "a") as exports:
+            exports.write("%s\n" % self.export_string)
+        if sys.platform == 'darwin':
+            # subprocess.call(["nfsd", "enable"])
+            subprocess.call(["nfsd", "restart"])
+        elif sys.platform.startswith('linux'):
+            # shit...now we have to guess what distro we're on
+            subprocess.call(["..."])
+
+    @staticmethod
+    def stop():
+        # WARNING: not the safest thing to do... :/
+        # Get all the lines, and remove ours
+        lines = open("/etc/exports", "r").readlines()
+        lines = filter(lambda x: not x.endswith("# WheelOfDistros\n"), lines)
+        # Now write back everything else
+        with open("/etc/exports", "w") as exports:
+            for line in lines:
+                exports.write(line)
+        if sys.platform == 'darwin':
+            # subprocess.call(["nfsd", "enable"])
+            subprocess.call(["nfsd", "stop"])
 
 
 DistroMapping = {"archlinux": ArchLinux, "centos": CentOS,
-                 "opensuse": OpenSUSE, "debian": Debian, "ubuntu": Ubuntu}
+                 "opensuse": OpenSUSE, "debian": Debian, "ubuntu": Ubuntu,
+                 "ubuntulive": UbuntuLive}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
@@ -621,17 +792,20 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "opensuse", "ubuntu"):
+        for x in ("centos", "debian", "opensuse", "ubuntu", "ubuntulive"):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
             d.add_argument("release", choices=dc.RELEASES.keys(),
                            help="Distribution version")
             # Architecture
-
             d.add_argument("architecture",
                            choices=set.union(*[set(dc.RELEASES[z].keys())
                                                for z in dc.RELEASES]))
+            if x == "ubuntulive":
+                d.add_argument("--version", required=False,
+                               choices=["desktop", "server"],
+                               default="desktop")
             d.set_defaults(distro=x)
 
     ###########################################################################
@@ -652,6 +826,9 @@ if __name__ == '__main__':
         linux = DistroMapping[args.distro]()
     elif args.distro in ('centos', 'debian', 'opensuse', 'ubuntu'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
+    elif args.distro in ('ubuntulive'):
+        linux = DistroMapping[args.distro](args.release, args.architecture,
+                                           args.version)
 
     if args.command == "download":
         linux.fetch()
@@ -665,6 +842,10 @@ if __name__ == '__main__':
                           "10.1.0.100,10.1.0.200,12h",
                           interface=args.interface)
         dnsmasq.start()
+        if args.distro in ("ubuntulive"):
+            nfs = NFS(linux.nfs_root, "10.1.0.0", "255.255.255.0")
+            nfs.start()
     elif args.command == "stop":
         DNSMasq.stop()
         NAT.stop()
+        NFS.stop()

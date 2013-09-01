@@ -20,13 +20,15 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 
 * OpenSUSE
 
-* Ubuntu
+* Ubuntu (install / live)
 
 # Warnings
 
 * When using the **NAT** feature, the program assumes nothing else is happening with networking, and upon stopping will flush ipfw/iptables, killall natd and stop ipv4 fowarding. If you were using that for something else, re-enable it, or undo the changes manually.
 
 * On OS X if using ethernet, dnsmasq might not be able to start until the link is up (possible up until the point when the computer is trying to pxe boot). Just keep trying to run the serve command
+
+* When using LiveCDs or some of the distros (FILL IN HERE), nfs exports will be updated. After calling the stop, all lines ending with "# WheelOfDistros" will be removed from /etc/exports, by reading all the lines and then writing them back...there's a small chance that if python crashes while writing back, that some of the exports will be lost...so if you value that, then make a backup of /etc/exports
 
 # Usage
 

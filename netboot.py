@@ -95,7 +95,7 @@ def checksum_file(f, checksum_type="sha256"):
             time_left = int((size - checked) / rate)
         # TODO: fix whitespace on the right due to non-overwriting
         print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
-            file_name, p * 100.0, time_left / 3600, time_left / 60,
+            file_name, p * 100.0, time_left / 3600, time_left % 60,
             time_left % 60, pretty_bytes(rate)),
     print ""
     return h.hexdigest()
@@ -164,7 +164,7 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                 time_left = int((size - downloaded) / rate)
             # TODO: fix whitespace on the right due to non-overwriting
             print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
-                file_name, p * 100.0, time_left / 3600, time_left / 60,
+                file_name, p * 100.0, time_left / 3600, time_left % 60,
                 time_left % 60, pretty_bytes(rate)),
         print ""
         destination.close()

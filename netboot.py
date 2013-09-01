@@ -206,60 +206,39 @@ def extract_iso(iso, destination, source=None):
 class LinuxDistro(object):
     """Abstracts a Linux Distribution
     Expects that fetch, unpack, start, and stop will be subclassed
-    and that self.tftp_root will be defined
+
+    dhcp_boot default is pxelinux.0
 
     """
-    def __init__(self):
+    def __init__(self, tftp_prefix):
         """Create a new LinuxDistro object
+
+        Arguments:
+        tftp_prefix - tftp_root directory name in cwd/root
+
         """
         super(LinuxDistro, self).__init__()
-        self.tftp_root = None
+        self.tftp_root = "%s/root/%s" % (os.getcwd(), tftp_prefix)
+        self.dhcp_boot = "pxelinux.0"
 
     def fetch(self):
         """Download resources from the web
         """
-        raise NotImplementedError(type(self))
+        pass
 
     def unpack(self):
         """Unpack downloaded resources
         """
-        raise NotImplementedError(type(self))
+        pass
 
     def start(self):
         """Do anything else before running dnsmasq
         """
-        raise NotImplementedError(type(self))
+        pass
 
     def stop(self):
         """Do anything else after dnsmasq is stopped
         """
-        raise NotImplementedError(type(self))
-
-
-class ArchLinux(LinuxDistro):
-    """docstring for ArchLinux"""
-    def __init__(self):
-        super(ArchLinux, self).__init__()
-        self.tftp_root = "%s/root/archlinux" % (os.getcwd())
-        self.dhcp_boot = "ipxe.pxe"
-
-    def fetch(self):
-        # WARNING: this might easily break since archlinux is rolling...
-        download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe",
-                      "%s/ipxe.pxe" % self.tftp_root,
-                      checksum="2d0c3d05cff23e2382f19c68902554c7388d642e38a9a32895db5b890cca4071",
-                      checksum_type="sha256")
-
-    def unpack(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
-
-    def start(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
-
-    def stop(self):
-        # Nothing to do here - we just need dnsmasq
         pass
 
 
@@ -271,10 +250,19 @@ class RelArchDistro(LinuxDistro):
 
     """
 
-    RELEASE = {}
+    RELEASES = {}
 
-    def __init__(self, release, architecture):
-        super(RelArchDistro, self).__init__()
+    def __init__(self, tftp_prefix, release, architecture):
+        """Create a new RelArchDistro and check self.RELEASES
+
+        Arguments:
+        tftp_prefix - tftp_prefix to pass to LinuxDistro
+        release - distribution version
+        architecture - machine architecture
+
+        """
+        super(RelArchDistro, self).__init__(tftp_prefix)
+        self.tftp_root = "%s/%s/%s" % (self.tftp_root, release, architecture)
         self.release = release
         self.architecture = architecture
         # Check that its a valid release
@@ -287,51 +275,53 @@ class RelArchDistro(LinuxDistro):
                 self.architecture, self.release))
 
 
-class CentOS(RelArchDistro):
-    """docstring for CentOS"""
+class KernelInitrdDistro(RelArchDistro):
+    """Abstracts a RelArchDistro which downloads a kernel and initrd
+    The pxelinux configuration is built locally
 
-    RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/" \
-                   "CentOS-%s-%s-netinstall.iso"
-    RELEASES = {
-        "5.9": {
-            "i386": ("7676fd259076ce1516142d7be7e2f569a1ec70b08965af9a570680c21705a4c1", "sha256"),
-            "x86_64": ("0f6d85b6a866c50fc89185f0402cb0fe0d942c62832b9359ca07eec3f6ea6ed8" "sha256")
-        },
-        "6.4": {
-            "i386": ("1c32d5414559ff54a35b08b1dfb094a5cb0b0586fcb7e2116015f185995dabcc", "sha256"),
-            "x86_64": ("8b3a138e60aaeb172368701637c8b6f7ec39c0cb16978e69caeaff6bc4cfdf1b" "sha256")
-        }
-    }
+    Expects a self.RESOURCE_URL which will have three %s placeholders:
+    release, architecture, kernel/initrd
 
-    def __init__(self, release, architecture):
-        super(CentOS, self).__init__(release, architecture)
-        self.tftp_root = "%s/root/centos/%s/%s" % (os.getcwd(), self.release,
-                                                   self.architecture)
-        self.dhcp_boot = "pxelinux.0"
+    """
+
+    RESOURCE_URL = ""
+
+    RELEASES = {}
+
+    def __init__(self, tftp_prefix, release, architecture, kernel, initrd,
+                 k_opts=None, i_opts=None):
+        """Create a new KernelInitrdDistro. Ready to download kernel and initrd
+        and to configure pxelinux
+
+        Arguments:
+        tftp_prefix - tftp_prefix to pass to LinuxDistro
+        release - distribution version
+        architecture - machine architecture
+        kernel - kernel base name
+        initrd - initrd base name
+
+        Keyword Arguments:
+        k_opts - kernel options to pass at boot
+        i_opts - initrd options to pass at boot
+
+        """
+        super(KernelInitrdDistro, self).__init__(tftp_prefix, release,
+                                                 architecture)
+        self.kernel = kernel
+        self.initrd = initrd
+        self.k_opts = k_opts if k_opts is not None else ""
+        self.i_opts = i_opts if i_opts is not None else ""
 
     def fetch(self):
-        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
         download_file(self.RESOURCE_URL % (self.release, self.architecture,
-                      self.release, self.architecture),
-                      "%s/netinstall.iso" % self.tftp_root,
-                      checksum=checksum,
-                      checksum_type=checksum_type)
+                      self.kernel), "%s/%s" % (self.tftp_root, self.kernel))
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      self.initrd), "%s/%s" % (self.tftp_root, self.initrd))
 
     def unpack(self):
-        iso = "%s/netinstall.iso" % self.tftp_root
-        files_to_copy = [("/images/pxeboot/vmlinuz", "vmlinuz"),
-                         ("/images/pxeboot/initrd.img", "initrd.img")]
-        for src, dst in files_to_copy:
-            print "%s %s" % (colorize("Extracting:", "blue"), dst)
-            with open("%s/%s" % (self.tftp_root, dst), "wb") as output:
-                subprocess.call(["isoinfo", "-J", "-i", iso, "-x", src],
-                                stdout=output)
-        # Copy syslinux files
-        files_to_copy = ["pxelinux.0"]
-        if self.architecture == "i386":
-            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
-        else:
-            files_to_copy += ["ldlinux.e64"]
+         # Copy syslinux files
+        files_to_copy = ["pxelinux.0", "ldlinux.c32", "ldlinux.e32",
+                         "ldlinux.e64"]
         for f in files_to_copy:
             print "%s %s" % (colorize("Copying:", "blue"), f)
             shutil.copy("syslinux/%s" % f, self.tftp_root)
@@ -344,22 +334,51 @@ class CentOS(RelArchDistro):
         kernel_string = """
 default linux
 label linux
-    kernel vmlinuz method=http://mirror.centos.org/centos/6/os/%s/
-    append initrd=initrd.img devfs=nomount
-                """ % self.architecture
+    kernel %s %s
+    append initrd=%s %s
+                """ % (self.kernel, self.k_opts, self.initrd, self.i_opts)
 
         print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
                          colorize(kernel_string, "white"))
         with open('%s/default' % directory, 'w') as output:
             output.write(kernel_string)
 
-    def start(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
 
-    def stop(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
+class ArchLinux(LinuxDistro):
+    """docstring for ArchLinux"""
+    def __init__(self):
+        super(ArchLinux, self).__init__("archlinux")
+        self.dhcp_boot = "ipxe.pxe"
+
+    def fetch(self):
+        # WARNING: this might easily break since archlinux is rolling...
+        download_file("https://releng.archlinux.org/pxeboot/ipxe.pxe",
+                      "%s/ipxe.pxe" % self.tftp_root,
+                      checksum="2d0c3d05cff23e2382f19c68902554c7388d642e38a9a"
+                               "32895db5b890cca4071", checksum_type="sha256")
+
+
+class CentOS(KernelInitrdDistro):
+    """docstring for CentOS"""
+
+    RESOURCE_URL = "http://mirror.centos.org/centos/%s/os/%s/images/pxeboot/%s"
+
+    RELEASES = {
+        "5.9": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "6.4": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        }
+    }
+
+    def __init__(self, release, architecture):
+        super(CentOS, self).__init__(
+            "centos", release, architecture, "vmlinuz", "initrd.img",
+            k_opts="method=http://mirror.centos.org/centos/%s/os/%s/" % (
+                release, architecture), i_opts="devfs=nomount")
 
 
 class Debian(RelArchDistro):
@@ -393,11 +412,7 @@ class Debian(RelArchDistro):
         architecture - cpu architecture
 
         """
-        super(Debian, self).__init__(release, architecture)
-        # Set our tftp_root directory
-        self.tftp_root = "%s/root/debian/%s/%s" % (os.getcwd(), self.release,
-                                                   self.architecture)
-        self.dhcp_boot = "pxelinux.0"
+        super(Debian, self).__init__("debian", release, architecture)
 
     def fetch(self):
         checksum, checksum_type = self.RELEASES[self.release][self.architecture]
@@ -412,16 +427,45 @@ class Debian(RelArchDistro):
         t = tarfile.open('%s/netboot.tar.gz' % self.tftp_root)
         t.extractall(self.tftp_root)
 
-    def start(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
 
-    def stop(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
+class Fedora(KernelInitrdDistro):
+    """docstring for Fedora"""
+
+    RESOURCE_URL = "http://download.fedoraproject.org/pub/fedora/linux" \
+                   "/releases/%s/Fedora/%s/os/images/pxeboot/%s"
+
+    RELEASES = {
+        "15": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "16": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "17": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "18": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "19": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+    }
+
+    def __init__(self, release, architecture):
+        super(Fedora, self).__init__(
+            "fedora", release, architecture, "vmlinuz", "initrd.img",
+            k_opts="inst.repo=http://download.fedoraproject.org/pub/fedora"
+                    "/linux/releases/%s/Fedora/%s/os/" % (release,
+                                                          architecture))
 
 
-class OpenSUSE(RelArchDistro):
+class OpenSUSE(KernelInitrdDistro):
     """docstring for OpenSUSE"""
 
     RESOURCE_URL = "http://download.opensuse.org/distribution/%s/repo/oss" \
@@ -444,70 +488,28 @@ class OpenSUSE(RelArchDistro):
             "i386": (None, None),
             "x86_64": (None, None)
         },
-        "openSUSE-current" : {
+        "openSUSE-current": {
             "i386": (None, None),
             "x86_64": (None, None)
         },
-        "openSUSE-stable" : {
+        "openSUSE-stable": {
             "i386": (None, None),
             "x86_64": (None, None)
         }
     }
 
     def __init__(self, release, architecture):
-        super(OpenSUSE, self).__init__(release, architecture)
-        self.tftp_root = "%s/root/opensuse/%s/%s" % (os.getcwd(), self.release,
-                                                     self.architecture)
-        self.dhcp_boot = "pxelinux.0"
-
-    def fetch(self):
-        download_file(self.RESOURCE_URL % (self.release, self.architecture,
-                      "linux"), "%s/linux" % self.tftp_root)
-        download_file(self.RESOURCE_URL % (self.release, self.architecture,
-                      "initrd"), "%s/initrd" % self.tftp_root)
-
-    def unpack(self):
-         # Copy syslinux files
-        files_to_copy = ["pxelinux.0"]
-        if self.architecture == "i386":
-            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
-        else:
-            files_to_copy += ["ldlinux.e64"]
-        for f in files_to_copy:
-            print "%s %s" % (colorize("Copying:", "blue"), f)
-            shutil.copy("syslinux/%s" % f, self.tftp_root)
-
-        # Write out the menu
-        directory = "%s/pxelinux.cfg" % self.tftp_root
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-        kernel_string = """
-default linux
-label linux
-    kernel linux install=http://download.opensuse.org/distribution/%s/repo/oss/
-    append initrd=initrd
-                """ % self.release
-
-        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
-                         colorize(kernel_string, "white"))
-        with open('%s/default' % directory, 'w') as output:
-            output.write(kernel_string)
-
-    def start(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
-
-    def stop(self):
-        # Nothing to do here - we just need dnsmasq
-        pass
+        super(OpenSUSE, self).__init__(
+            "opensuse",release, architecture, "linux", "initrd",
+            k_opts="install=http://download.opensuse.org/distribution/%s"
+                   "/repo/oss/" % release)
 
 
 class Ubuntu(Debian):
     """Ubuntu Distribution"""
 
-    RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main/" \
-                   "installer-%s/current/images/netboot/netboot.tar.gz"
+    RESOURCE_URL = "http://archive.ubuntu.com/ubuntu/dists/%s/main" \
+                   "/installer-%s/current/images/netboot/netboot.tar.gz"
 
     RELEASES = {
         "hardy": {
@@ -542,8 +544,8 @@ class Ubuntu(Debian):
 
     def __init__(self, *args):
         super(Ubuntu, self).__init__(*args)
-        self.tftp_root = "%s/root/ubuntu/%s/%s" % (os.getcwd(), self.release,
-                                                   self.architecture)
+        # Fix up tftp_root
+        self.tftp_root = self.tftp_root.replace("debian", "ubuntu")
 
 
 class UbuntuLive(RelArchDistro):
@@ -762,8 +764,8 @@ class NFS(object):
 
 
 DistroMapping = {"archlinux": ArchLinux, "centos": CentOS,
-                 "opensuse": OpenSUSE, "debian": Debian, "ubuntu": Ubuntu,
-                 "ubuntulive": UbuntuLive}
+                 "opensuse": OpenSUSE, "debian": Debian, "fedora": Fedora,
+                 "ubuntu": Ubuntu, "ubuntulive": UbuntuLive}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
@@ -792,7 +794,7 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "opensuse", "ubuntu", "ubuntulive"):
+        for x in ("centos", "debian", "fedora", "opensuse", "ubuntu", "ubuntulive"):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
@@ -824,7 +826,7 @@ if __name__ == '__main__':
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    elif args.distro in ('centos', 'debian', 'opensuse', 'ubuntu'):
+    elif args.distro in ('centos', 'debian', 'fedora', 'opensuse', 'ubuntu'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
     elif args.distro in ('ubuntulive'):
         linux = DistroMapping[args.distro](args.release, args.architecture,

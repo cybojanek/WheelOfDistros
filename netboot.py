@@ -423,99 +423,41 @@ DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
-
     subcommands = parser.add_subparsers(help="Commands")
 
     ###########################################################################
-    ################################# Download ################################
+    ############################ Download & Serve #############################
     ###########################################################################
     download = subcommands.add_parser("download")
     download.set_defaults(command="download")
-    distros = download.add_subparsers(help="Distros")
 
-    ################### ArchLinux ###################
-    archlinux = distros.add_parser("archlinux")
-    archlinux.set_defaults(distro="archlinux")
-    ################### CentOS ###################
-    # Distro release
-    centos = distros.add_parser("centos")
-    centos.add_argument("release",
-                        choices=CentOS.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    centos.add_argument("architecture",
-                        choices=set.union(*(CentOS.RELEASES.values())))
-    centos.set_defaults(distro="centos")
-    ################### Debian ###################
-    # Distro release
-    debian = distros.add_parser("debian")
-    debian.add_argument("release",
-                        choices=Debian.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    debian.add_argument("architecture",
-                        choices=set.union(*(Debian.RELEASES.values())))
-    debian.set_defaults(distro="debian")
-
-    ################### Ubuntu ###################
-    # Distro release
-    ubuntu = distros.add_parser("ubuntu")
-    ubuntu.add_argument("release",
-                        choices=Ubuntu.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    ubuntu.add_argument("architecture",
-                        choices=set.union(*(Ubuntu.RELEASES.values())))
-    ubuntu.set_defaults(distro="ubuntu")
-
-    ###########################################################################
-    ################################### Serve #################################
-    ###########################################################################
     serve = subcommands.add_parser("serve")
     serve.set_defaults(command="serve")
-
     # dnsmasq interface
     serve.add_argument("--interface", required=True,
                        help="Interface to serve dhcp and tftp")
     # NAT interface
     serve.add_argument("--nat", required=False, help="Interface for NAT")
 
-    distros = serve.add_subparsers(help="Distros")
+    # Add subcommands for each distro to download and serve
+    for cmd in (download, serve):
+        distros = cmd.add_subparsers(help="Distros")
 
-    ################### ArchLinux ###################
-    archlinux = distros.add_parser("archlinux")
-    archlinux.set_defaults(distro="archlinux")
-    ################### CentOS ###################
-    # Distro release
-    centos = distros.add_parser("centos")
-    centos.add_argument("release",
-                        choices=CentOS.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    centos.add_argument("architecture",
-                        choices=set.union(*(CentOS.RELEASES.values())))
-    centos.set_defaults(distro="centos")
-    ################### Debian ###################
-    # Distro release
-    debian = distros.add_parser("debian")
-    debian.add_argument("release",
-                        choices=Debian.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    debian.add_argument("architecture",
-                        choices=set.union(*(Debian.RELEASES.values())))
-    debian.set_defaults(distro="debian")
+        ################### ArchLinux ###################
+        archlinux = distros.add_parser("archlinux")
+        archlinux.set_defaults(distro="archlinux")
 
-    ################### Ubuntu ###################
-    # Distro release
-    ubuntu = distros.add_parser("ubuntu")
-    ubuntu.add_argument("release",
-                        choices=Ubuntu.RELEASES.keys(),
-                        help="Distribution version")
-    # Architecture
-    ubuntu.add_argument("architecture",
-                        choices=set.union(*(Ubuntu.RELEASES.values())))
-    ubuntu.set_defaults(distro="ubuntu")
+        ################### Others ###################
+        for x in ("centos", "debian", "ubuntu"):
+            d = distros.add_parser(x)
+            dc = DistroMapping[x]
+            # Distro release
+            d.add_argument("release", choices=dc.RELEASES.keys(),
+                           help="Distribution version")
+            # Architecture
+            d.add_argument("architecture",
+                           choices=set.union(*(dc.RELEASES.values())))
+            d.set_defaults(distro=x)
 
     ###########################################################################
     ################################### Stop ##################################

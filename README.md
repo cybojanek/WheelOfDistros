@@ -8,19 +8,22 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 
 * python
 
+* nfsd (for live cd)
+
 * isoinfo (cdrtools package, for live cds)
 
 # Supported Distros
 
-| Distro     | Netboot Install | Live CD |
-| ---------- | --------------: | ------: |
-| ArchLinux  |             Yes |      No |
-| Centos     |             Yes |      No |
-| Debian     |             Yes |      No |
-| Fedora     |             Yes |      No |
-| Linux Mint |              No |     Yes |
-| OpenSUSE   |             Yes |      No |
-| Ubuntu     |             Yes |     Yes |
+| Distro           | Netboot Install | Live CD |
+| ---------------- | --------------: | ------: |
+| ArchLinux        |               x |         |
+| Centos           |               x |         |
+| Debian           |               x |         |
+| Fedora           |               x |         |
+| Linux Mint       |                 |       x |
+| OpenSUSE         |               x |         |
+| System Rescue CD |                 |       x |
+| Ubuntu           |               x |       x |
 
 # Usage
 

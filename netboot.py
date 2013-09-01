@@ -95,7 +95,7 @@ def checksum_file(f, checksum_type="sha256"):
             time_left = int((size - checked) / rate)
         # TODO: fix whitespace on the right due to non-overwriting
         print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
-            file_name, p * 100.0, time_left / 3600, time_left % 60,
+            file_name, p * 100.0, time_left / 3600, time_left / 60 % 60,
             time_left % 60, pretty_bytes(rate)),
     print ""
     return h.hexdigest()
@@ -164,7 +164,7 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                 time_left = int((size - downloaded) / rate)
             # TODO: fix whitespace on the right due to non-overwriting
             print "%s    %05.2f %%    %02.0f:%02.0f:%02.0f    %s/s     \r" % (
-                file_name, p * 100.0, time_left / 3600, time_left % 60,
+                file_name, p * 100.0, time_left / 3600, time_left / 60 % 60,
                 time_left % 60, pretty_bytes(rate)),
         print ""
         destination.close()
@@ -176,12 +176,12 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                 sys.exit(1)
 
 
-def extract_iso(iso, destination, source=None):
+def extract_iso(iso, destination):
     print "%s %s" % (colorize("Extracting:", "blue"), iso)
     if not os.path.exists(destination):
             os.makedirs(destination)
     # Get a list of all the directories
-    p = subprocess.Popen(["isoinfo", "-R", "-l", "-i", iso],
+    p = subprocess.Popen(["isoinfo", "-J", "-l", "-i", iso],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = p.communicate()
     last_dir = "/"
@@ -350,7 +350,7 @@ class LiveCD(KernelInitrdDistro):
     RESOURCE_URL = ""
 
     def __init__(self, tftp_prefix, release, architecture, kernel, initrd,
-                 k_opts=None, i_opts=None):
+                 k_opts=None, i_opts=None, nfs_root_name="nfsroot"):
         super(LiveCD, self).__init__(tftp_prefix, release, architecture,
                                      os.path.basename(kernel),
                                      os.path.basename(initrd), k_opts, i_opts)
@@ -358,7 +358,8 @@ class LiveCD(KernelInitrdDistro):
         self.live_initrd = initrd
         self.nfs_root = "%s/iso" % (self.tftp_root)
         # Extend kernel opts with nfsroot
-        self.k_opts = "%s nfsroot=10.1.0.1:%s" % (self.k_opts, self.nfs_root)
+        self.k_opts = "%s %s=10.1.0.1:%s" % (self.k_opts, nfs_root_name,
+                                             self.nfs_root)
 
     def fetch(self):
         checksum, checksum_type = self.RELEASES[self.release][self.architecture]
@@ -576,6 +577,31 @@ class OpenSUSE(KernelInitrdDistro):
                    "/repo/oss/" % release)
 
 
+class SystemRescueCD(LiveCD):
+    """docstring for SystemRescueCD"""
+
+    RESOURCE_URL = "http://downloads.sourceforge.net/project/systemrescuecd" \
+                   "/sysresccd-%s/%s/systemrescuecd-%s-%s.iso"
+
+    RELEASES = {
+        "3.7.1": {
+            "x86": ("97a6204bd01b88a3be48774ce832792f877c3baaf8f3f2602fcd3e3c30960051", "sha256")
+        }
+    }
+
+    def __init__(self, release, architecture):
+        super(SystemRescueCD, self).__init__(
+            "system_rescue_cd", release, architecture, "isolinux/rescue32",
+            "isolinux/initram.igz", nfs_root_name="nfsboot")
+
+    def fetch(self):
+        checksum, checksum_type = self.RELEASES[self.release][self.architecture]
+        download_file(self.RESOURCE_URL % (self.architecture, self.release,
+                                           self.architecture, self.release),
+                      "%s/livecd.iso" % self.tftp_root, checksum=checksum,
+                      checksum_type=checksum_type)
+
+
 class Ubuntu(Debian):
     """Ubuntu Distribution"""
 
@@ -775,7 +801,7 @@ class NFS(object):
 
 DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
                  "fedora": Fedora, "mint_live": LinuxMint,
-                 "opensuse": OpenSUSE,
+                 "opensuse": OpenSUSE, "systemrescuecd": SystemRescueCD,
                  "ubuntu": Ubuntu, "ubuntu_live": UbuntuLive}
 
 if __name__ == '__main__':
@@ -805,7 +831,7 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "fedora", "mint_live", "opensuse", "ubuntu", "ubuntu_live"):
+        for x in filter(lambda x: issubclass(DistroMapping[x], RelArchDistro), DistroMapping.keys()):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
@@ -831,10 +857,13 @@ if __name__ == '__main__':
                                   "red"))
         sys.exit(1)
 
-    if args.distro == 'archlinux':
-        linux = DistroMapping[args.distro]()
-    elif args.distro in ('centos', 'debian', 'fedora', 'mint_live', 'opensuse', 'ubuntu', 'ubuntu_live'):
-        linux = DistroMapping[args.distro](args.release, args.architecture)
+    # Parse the distro class
+    if args.distro is not None:
+        linux_class = DistroMapping[args.distro]
+        if issubclass(linux_class, RelArchDistro):
+            linux = linux_class(args.release, args.architecture)
+        else:
+            linux = linux_class()
 
     if args.command == "download":
         linux.fetch()
@@ -848,7 +877,7 @@ if __name__ == '__main__':
                           "10.1.0.100,10.1.0.200,12h",
                           interface=args.interface)
         dnsmasq.start()
-        if args.distro in ("mint_live", "ubuntu_live"):
+        if isinstance(linux, LiveCD):
             nfs = NFS(linux.nfs_root, "10.1.0.0", "255.255.255.0")
             nfs.start()
     elif args.command == "stop":

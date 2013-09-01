@@ -168,11 +168,12 @@ def download_file(url, output, checksum=None, checksum_type="sha256"):
                 time_left % 60, pretty_bytes(rate)),
         print ""
         destination.close()
-        cf = checksum_file(output, checksum_type=checksum_type)
-        if checksum and cf != checksum:
-            print colorize("Checksum didn't validate: %s != %s"
-                           "" % (checksum, cf), "red")
-            sys.exit(1)
+        if checksum is not None:
+            cf = checksum_file(output, checksum_type=checksum_type)
+            if cf != checksum:
+                print colorize("Checksum didn't validate: %s != %s"
+                               "" % (checksum, cf), "red")
+                sys.exit(1)
 
 
 class LinuxDistro(object):
@@ -235,7 +236,113 @@ class ArchLinux(LinuxDistro):
         pass
 
 
-class CentOS(LinuxDistro):
+class RelArchDistro(LinuxDistro):
+    """Abstracts a Linux Distribution that has a release and architecture
+    Checks that release and architecture are in self.RELEASES
+
+    Expects all subclasses to implement the rest of LinuxDistro
+
+    """
+
+    RELEASE = {}
+
+    def __init__(self, release, architecture):
+        super(RelArchDistro, self).__init__()
+        self.release = release
+        self.architecture = architecture
+        # Check that its a valid release
+        if self.release not in self.RELEASES:
+            raise Exception("No such %s release: %s" % (type(self),
+                                                        self.release))
+        # Check that the architecture is supported for that release
+        if self.architecture not in self.RELEASES[self.release]:
+            raise Exception("No architecture %s in release %s" % (
+                self.architecture, self.release))
+
+
+class OpenSUSE(RelArchDistro):
+    """docstring for OpenSUSE"""
+
+    RESOURCE_URL = "http://download.opensuse.org/distribution/%s/repo/oss" \
+                   "/boot/%s/loader/%s"
+
+    RELEASES = {
+        "11.4": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.1": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.2": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "12.3": {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "openSUSE-current" : {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        },
+        "openSUSE-stable" : {
+            "i386": (None, None),
+            "x86_64": (None, None)
+        }
+    }
+
+    def __init__(self, release, architecture):
+        super(OpenSUSE, self).__init__(release, architecture)
+        self.tftp_root = "%s/root/opensuse/%s/%s" % (os.getcwd(), self.release,
+                                                     self.architecture)
+        self.dhcp_boot = "pxelinux.0"
+
+    def fetch(self):
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      "linux"), "%s/linux" % self.tftp_root)
+        download_file(self.RESOURCE_URL % (self.release, self.architecture,
+                      "initrd"), "%s/initrd" % self.tftp_root)
+
+    def unpack(self):
+         # Copy syslinux files
+        files_to_copy = ["pxelinux.0"]
+        if self.architecture == "i386":
+            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
+        else:
+            files_to_copy += ["ldlinux.e64"]
+        for f in files_to_copy:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("syslinux/%s" % f, self.tftp_root)
+
+        # Write out the menu
+        directory = "%s/pxelinux.cfg" % self.tftp_root
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        kernel_string = """
+default linux
+label linux
+    kernel linux install=http://download.opensuse.org/distribution/%s/repo/oss/
+    append initrd=initrd
+                """ % self.release
+
+        print "%s %s" % (colorize("Writing default kernel boot:", "blue"),
+                         colorize(kernel_string, "white"))
+        with open('%s/default' % directory, 'w') as output:
+            output.write(kernel_string)
+
+    def start(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+    def stop(self):
+        # Nothing to do here - we just need dnsmasq
+        pass
+
+
+class CentOS(RelArchDistro):
     """docstring for CentOS"""
 
     RESOURCE_URL = "http://mirrors.gigenet.com/centos/%s/isos/%s/" \
@@ -252,17 +359,7 @@ class CentOS(LinuxDistro):
     }
 
     def __init__(self, release, architecture):
-        super(CentOS, self).__init__()
-        self.release = release
-        self.architecture = architecture
-        # Check that its a valid release
-        if self.release not in self.RELEASES:
-            raise Exception("No such %s release: %s" % (type(self),
-                                                        self.release))
-        # Check that the architecture is supported for that release
-        if self.architecture not in self.RELEASES[self.release]:
-            raise Exception("No architecture %s in release %s" % (
-                self.architecture, self.release))
+        super(CentOS, self).__init__(release, architecture)
         self.tftp_root = "%s/root/centos/%s/%s" % (os.getcwd(), self.release,
                                                    self.architecture)
         self.dhcp_boot = "pxelinux.0"
@@ -297,8 +394,14 @@ class CentOS(LinuxDistro):
                 subprocess.call(["isoinfo", "-J", "-i", iso, "-x",
                                 "/images/pxeboot/initrd.img"], stdout=output)
         # Copy syslinux files
-        print colorize("Copying pxelinux.0", "blue")
-        shutil.copy("syslinux/pxelinux.0", self.tftp_root)
+        files_to_copy = ["pxelinux.0"]
+        if self.architecture == "i386":
+            files_to_copy += ["ldlinux.c32", "ldlinux.e32"]
+        else:
+            files_to_copy += ["ldlinux.e64"]
+        for f in files_to_copy:
+            print "%s %s" % (colorize("Copying:", "blue"), f)
+            shutil.copy("syslinux/%s" % f, self.tftp_root)
 
         # Write out the menu
         directory = "%s/pxelinux.cfg" % self.tftp_root
@@ -326,7 +429,7 @@ label linux
         pass
 
 
-class Debian(LinuxDistro):
+class Debian(RelArchDistro):
     """Debian Distribution"""
 
     RESOURCE_URL = "http://ftp.nl.debian.org/debian/dists/%s/main/" \
@@ -357,17 +460,7 @@ class Debian(LinuxDistro):
         architecture - cpu architecture
 
         """
-        super(Debian, self).__init__()
-        self.release = release
-        self.architecture = architecture
-        # Check that its a valid release
-        if self.release not in self.RELEASES:
-            raise Exception("No such %s release: %s" % (
-                type(self), self.release))
-        # Check that the architecture is supported for that release
-        if self.architecture not in self.RELEASES[self.release]:
-            raise Exception("No architecture %s in release %s" % (
-                self.architecture, self.release))
+        super(Debian, self).__init__(release, architecture)
         # Set our tftp_root directory
         self.tftp_root = "%s/root/debian/%s/%s" % (os.getcwd(), self.release,
                                                    self.architecture)
@@ -509,8 +602,8 @@ class NAT(object):
                              # "-o", self.interface, "-j", "MASQUERADE"])
 
 
-DistroMapping = {"archlinux": ArchLinux, "centos": CentOS, "debian": Debian,
-                 "ubuntu": Ubuntu}
+DistroMapping = {"archlinux": ArchLinux, "centos": CentOS,
+                 "opensuse": OpenSUSE, "debian": Debian, "ubuntu": Ubuntu}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Install Linux over netboot")
@@ -539,7 +632,7 @@ if __name__ == '__main__':
         archlinux.set_defaults(distro="archlinux")
 
         ################### Others ###################
-        for x in ("centos", "debian", "ubuntu"):
+        for x in ("centos", "debian", "opensuse", "ubuntu"):
             d = distros.add_parser(x)
             dc = DistroMapping[x]
             # Distro release
@@ -568,7 +661,7 @@ if __name__ == '__main__':
 
     if args.distro == 'archlinux':
         linux = DistroMapping[args.distro]()
-    elif args.distro in ('centos', 'debian', 'ubuntu'):
+    elif args.distro in ('centos', 'debian', 'opensuse', 'ubuntu'):
         linux = DistroMapping[args.distro](args.release, args.architecture)
 
     if args.command == "download":
@@ -576,7 +669,7 @@ if __name__ == '__main__':
         linux.unpack()
     elif args.command == "serve":
         if args.nat is not None:
-            nat = NAT(args.nat)
+            nat = NAT(args.nat, args.interface)
             nat.start()
         linux.start()
         dnsmasq = DNSMasq(linux.tftp_root, linux.dhcp_boot,

@@ -18,7 +18,15 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 
 * CentOS
 
+* OpenSUSE
+
 * Ubuntu
+
+# Warnings
+
+* When using the **NAT** feature, the program assumes nothing else is happening with networking, and upon stopping will flush ipfw/iptables, killall natd and stop ipv4 fowarding. If you were using that for something else, re-enable it, or undo the changes manually.
+
+* On OS X if using ethernet, dnsmasq might not be able to start until the link is up (possible up until the point when the computer is trying to pxe boot). Just keep trying to run the serve command
 
 # Usage
 

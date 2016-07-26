@@ -1,6 +1,6 @@
 # Wheel of Distros
 
-Quickly netboot various Linux distros from a Linux / OS X computer
+Quickly netboot various Linux distros from Linux / OS X
 
 # Requirements
 
@@ -19,11 +19,31 @@ Quickly netboot various Linux distros from a Linux / OS X computer
 | ArchLinux        |               x |         |
 | Centos           |               x |         |
 | Debian           |               x |         |
+| ElementaryOS     |                 |       x |
 | Fedora           |               x |         |
+| FreeBSD          |                 |         |
 | Linux Mint       |                 |       x |
 | OpenSUSE         |               x |         |
 | System Rescue CD |                 |       x |
 | Ubuntu           |               x |       x |
+
+
+Tested:
+OSX
+===
+ArchLinux i386
+Centos i386: (5.10, 6.5)
+Debian i386: (squeeze, wheezy, jessie)
+Elementary OS (i386)
+Fedora i386: (18, 19, 20)
+FreeBSD i386: (almost - but r/o errors but mac extraction uppercase)
+Linux Mint Cinnamon i386: (13, 14, 15, 16, 17)
+Linux Mint Mate i386: (13, 14, 15, 16, 17)
+OpenSUSE i386: (13.1)
+SystemRescueCD: (3.7.1, 4.2.0)
+Ubuntu: (lucid, precise, quantal, raring, saucy, trusty)
+# Mount doesnt work....use iso extract method?
+UbuntuLive: ()
 
 # Usage
 
@@ -74,3 +94,4 @@ sudo killall -HUP mDNSResponder
 	- Did you set the ip for the interfaces you're trying to use?
 
 	- On OS X if using direct ethernet, dnsmasq might not be able to start until the link is up (possible up until the point when the computer is trying to pxe boot). Just keep trying to run the serve command
+
